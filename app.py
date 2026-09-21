@@ -23,24 +23,25 @@ for col,label,value in zip(cols,['Range resolution','Rectangular azimuth referen
 st.caption(f"Resolution references are ideal first-null separations for rectangular weighting. Measured azimuth −3 dB width: {s['azimuth_width_3db']:.2f} m. Hann weighting broadens the mainlobe while reducing sidelobes.")
 a,b=st.columns([1,1.3])
 with a:
-    z=sar.db(s['rd'])
+    z=sar.db(s['rd']).T  # transpose -> (range, Doppler)
     # Decimate data AND coordinate arrays together for the intermediate view.
     stride=max(1,int(np.ceil(len(s['doppler'])/600)))
-    fig=go.Figure(go.Heatmap(z=z[::stride],x=s['r'],y=s['doppler'][::stride],zmin=-40,zmax=0,colorscale='Inferno',colorbar=dict(title='dB')))
-    fig.add_hline(y=s['fd'],line_color='cyan',line_dash='dash')
-    fig.update_layout(title='Intermediate range–Doppler domain',xaxis_title='Slant-range offset from 5 km [m]',yaxis_title='Doppler frequency [Hz]',height=510)
+    fig=go.Figure(go.Heatmap(z=z[:,::stride],x=s['doppler'][::stride],y=s['range'],zmin=-40,zmax=0,colorscale='Inferno',colorbar=dict(title='dB')))
+    fig.add_vline(x=s['fd'],line_color='cyan',line_dash='dash')
+    fig.update_layout(title='Intermediate range–Doppler domain',xaxis_title='Relative Doppler frequency of scene [Hz]',yaxis_title='Slant range [m]',height=510)
     st.plotly_chart(fig,use_container_width=True, theme=None)
 with b:
     zoom=st.checkbox('Zoom to target response',value=True)
     selection=(abs(s['x']-s['shift']) < max(8,4*L)) if zoom else np.ones(len(s['x']),dtype=bool)
-    fig=go.Figure(go.Heatmap(z=sar.db(s['image'],False)[selection],x=s['r'],y=s['x'][selection],zmin=-40,zmax=0,colorscale='Inferno',colorbar=dict(title='dB')))
-    fig.add_trace(go.Scatter(x=[0],y=[0],mode='markers',marker=dict(symbol='cross',color='cyan',size=12),name='True position at aperture centre'))
-    fig.add_trace(go.Scatter(x=[0],y=[s['shift']],mode='markers',marker=dict(symbol='circle-open',color='lime',size=14),name='Predicted apparent position'))
-    fig.update_layout(title='Focused SAR image',xaxis_title='Slant-range offset from 5 km [m]',yaxis_title='Azimuth along flight track [m]',height=510,legend=dict(orientation='h',y=1.12))
+    z=sar.db(s['image'],False).T  # transpose -> (range, azimuth)
+    fig=go.Figure(go.Heatmap(z=z[:,selection],x=s['x'][selection],y=s['range'],zmin=-40,zmax=0,colorscale='Inferno',colorbar=dict(title='dB')))
+    fig.add_trace(go.Scatter(x=[0],y=[5000],mode='markers',marker=dict(symbol='cross',color='cyan',size=12),name='True position at aperture centre'))
+    fig.add_trace(go.Scatter(x=[s['shift']],y=[5000],mode='markers',marker=dict(symbol='circle-open',color='lime',size=14),name='Predicted apparent position'))
+    fig.update_layout(title='Focused SAR image',xaxis_title='Azimuth along flight track [m]',yaxis_title='Slant range [m]',height=510,legend=dict(orientation='h',y=1.12))
     st.plotly_chart(fig,use_container_width=True, theme=None)
     st.caption(f"Measured brightest pixel: range {sar.R0+s['peak_r']:.2f} m, azimuth {s['peak_x']:+.2f} m. True centre-time location: (5000 m, 0 m). Disable zoom to see both positions when moving.")
 c,d=st.columns(2)
-for col,axis,key,label in [(c,s['r'],'range_profile','Slant-range offset [m]'),(d,s['x'],'azimuth_profile','Azimuth [m]')]:
+for col,axis,key,label in [(c,s['range'],'range_profile','Slant range [m]'),(d,s['x'],'azimuth_profile','Azimuth [m]')]:
     with col:
         f=go.Figure(go.Scatter(x=axis,y=sar.db(s[key],False)))
         f.update_layout(xaxis_title=label,yaxis_title='Response relative to stationary peak [dB]',height=280,yaxis_range=[-40,1])

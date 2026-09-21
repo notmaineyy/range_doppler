@@ -38,7 +38,7 @@ def simulate(bandwidth_mhz=200., radial_velocity=0., antenna_length=2.,
     focused, x = focused[keep], x[keep]
     peak = np.unravel_index(np.abs(focused).argmax(), focused.shape)
     width = half_power_width(x, np.abs(focused[:, peak[1]]))
-    return dict(image=focused, rd=rd, r=r, x=x, doppler=doppler, t=t,
+    return dict(image=focused, rd=rd, r=r, range=R0 + r, x=x, doppler=doppler, t=t,
                 dr=dr, da=V/(rate*(n/PRF)), duration=n/PRF, fd=fd,
                 doppler_bw=rate*n/PRF, azimuth_width_3db=width,
                 aperture_fraction=aperture_fraction, azimuth_window=azimuth_window, shift=radial_velocity*R0/V,

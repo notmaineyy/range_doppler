@@ -41,7 +41,7 @@ export async function compute(p, cancelled=()=>false, yieldWork=async()=>{}){
  for(let y=0;y<rows;y++)xAxis[y]=(low+y)*dx;
  for(let col=0;col<NR;col++){
   if(cancelled())return null;
-  const r=-15+col*.1;rAxis[col]=r;re.fill(0);im.fill(0);
+   const r=-15+col*.1;rAxis[col]=5000+r;re.fill(0);im.fill(0);
   const withRD=col%2===0;if(withRD){dre.fill(0);dim.fill(0);}
   for(let k=0;k<n;k++){
    const env=sinc((r+vr*times[k])/dr);re[k]=env*wr[k];im[k]=env*wi[k];
