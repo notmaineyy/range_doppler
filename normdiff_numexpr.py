@@ -46,7 +46,8 @@ EPS = 1e-6
 # --------------------------------------------------------------------------- #
 # Variants
 # --------------------------------------------------------------------------- #
-def numpy_inplace(I1: np.ndarray, I2: np.ndarray, eps, cdtype=np.float32):
+def numpy_inplace(I1: np.ndarray, I2: np.ndarray, eps, cdtype=np.float32,
+                  out_dtype=None):
     """numpy: reuse two float32 buffers via out=."""
     a = I1.astype(cdtype)
     d = np.empty_like(a)
@@ -58,13 +59,20 @@ def numpy_inplace(I1: np.ndarray, I2: np.ndarray, eps, cdtype=np.float32):
     return d
 
 
-def numexpr_eval(I1: np.ndarray, I2: np.ndarray, eps):
-    """numexpr: single multithreaded expression, casting='safe'."""
-    return ne.evaluate(
-        "abs(I1 - I2) / (I1 + I2 + eps)",
-        local_dict={"I1": I1, "I2": I2, "eps": eps},
-        casting="safe",
-    )
+def numexpr_eval(I1: np.ndarray, I2: np.ndarray, eps, out_dtype="float64"):
+    """numexpr: single multithreaded expression.
+
+    out_dtype='float64' -> casting='safe' (default; result is float64).
+    out_dtype='float32' -> write into a float32 buffer with casting='same_kind'
+                           (float64 -> float32 is not a 'safe' cast, so numexpr
+                           refuses it under 'safe'). This halves result memory.
+    """
+    expr = "abs(I1 - I2) / (I1 + I2 + eps)"
+    local = {"I1": I1, "I2": I2, "eps": eps}
+    if out_dtype == "float32":
+        out = np.empty(I1.shape, dtype=np.float32)
+        return ne.evaluate(expr, local_dict=local, out=out, casting="same_kind")
+    return ne.evaluate(expr, local_dict=local, casting="safe")
 
 
 VARIANTS = {"numpy": numpy_inplace, "numexpr": numexpr_eval}
@@ -85,6 +93,9 @@ def main() -> int:
                     choices=["numpy", "numexpr"])
     ap.add_argument("--threads", type=int, default=0,
                     help="numexpr threads (0 = leave default)")
+    ap.add_argument("--out-dtype", default="float64",
+                    choices=["float32", "float64"],
+                    help="numexpr result dtype (float32 halves result memory)")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
@@ -125,7 +136,7 @@ def main() -> int:
         gc.collect()
         t0 = time.perf_counter()
         try:
-            result = fn(I1, I2, EPS)
+            result = fn(I1, I2, EPS, out_dtype=args.out_dtype)
         except MemoryError:
             print("  [ERROR] MemoryError during compute; skipped.")
             continue

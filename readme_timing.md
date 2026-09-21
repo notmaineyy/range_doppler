@@ -79,6 +79,7 @@ check that everything runs. Only use `1.1e9` when you have plenty of free memory
 | `--in-dtype` | `uint8` | input storage: `uint8`, `uint16`, `int16` |
 | `--mode` | `numpy numexpr` | run the numpy in-place baseline and/or numexpr |
 | `--threads` | `0` | numexpr threads; `0` keeps the default (= number of CPU cores) |
+| `--out-dtype` | `float64` | numexpr result type: `float64` (`casting='safe'`) or `float32` (`out=float32`, `casting='same_kind'`, half the memory) |
 | `--seed` | `0` | random seed |
 
 ---
@@ -161,6 +162,10 @@ how they execute it.
 - With `casting='safe'`, numexpr will not silently squeeze that `float64` result
   into a `float32` buffer (that would lose precision), so the result stays
   `float64`.
+- **Forcing 32-bit (`--out-dtype float32`):** you can pre-allocate a `float32`
+  result and pass it as `out=`. Because `float64 -> float32` is not a "safe"
+  cast, the casting rule must be relaxed to `'same_kind'` (or `'unsafe'`). This
+  halves the result memory (8.80 GB -> 4.40 GB at 1.1e9) at the **same speed**.
 
 ### Side-by-side
 
@@ -170,7 +175,7 @@ how they execute it.
 | Runs on | 1 core (default) | all cores (multithreaded) |
 | Temporary copies | few (with `out=`) | few (small block buffers) |
 | Compile step | none | JIT, once |
-| Result format (from `float32` math) | `float32` (4 bytes/px) | `float64` (8 bytes/px) |
+| Result format (from `float32` math) | `float32` (4 bytes/px) | `float64` by default; `float32` with `--out-dtype float32` (4 bytes/px) |
 | Best for | small/medium arrays, predictable memory | large arrays on multi-core machines |
 
 ### Practical rule of thumb
@@ -221,9 +226,16 @@ python3 -m venv .venv && .venv/bin/pip install numpy numexpr
 # numexpr vs numpy in-place
 .venv/bin/python normdiff_numexpr.py --pixels 1.1e9 --mode numpy numexpr
 
-# numexpr thread sweep
-for t in 1 2 4 8 10; do
-  .venv/bin/python normdiff_numexpr.py --pixels 1.1e9 --mode numexpr --threads $t
+# numexpr forced to float32 (half the result memory)
+.venv/bin/python normdiff_numexpr.py --pixels 1.1e9 --mode numpy numexpr \
+    --out-dtype float32
+
+# numexpr thread sweep (both result types)
+for dt in float64 float32; do
+  for t in 1 2 4 8 10; do
+    .venv/bin/python normdiff_numexpr.py --pixels 1.1e9 --mode numexpr \
+        --threads $t --out-dtype $dt
+  done
 done
 
 # quick, small, in-memory smoke test
