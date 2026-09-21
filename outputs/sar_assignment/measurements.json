@@ -1,0 +1,101 @@
+[
+  {
+    "variable": "bandwidth",
+    "value": 20,
+    "dr": 7.5,
+    "da": 1.0,
+    "shift": 0.0,
+    "walk": 0.0,
+    "peak_r": 0.0,
+    "peak_x": 0.0,
+    "peak_amplitude": 1.0
+  },
+  {
+    "variable": "bandwidth",
+    "value": 100,
+    "dr": 1.5,
+    "da": 1.0,
+    "shift": 0.0,
+    "walk": 0.0,
+    "peak_r": 0.0,
+    "peak_x": 0.0,
+    "peak_amplitude": 1.0
+  },
+  {
+    "variable": "bandwidth",
+    "value": 500,
+    "dr": 0.3,
+    "da": 1.0,
+    "shift": 0.0,
+    "walk": 0.0,
+    "peak_r": 0.0,
+    "peak_x": 0.0,
+    "peak_amplitude": 1.0
+  },
+  {
+    "variable": "radial_velocity",
+    "value": -3,
+    "dr": 0.75,
+    "da": 1.0,
+    "shift": -100.0,
+    "walk": 1.5,
+    "peak_r": 0.0,
+    "peak_x": -100.0,
+    "peak_amplitude": 0.5894901326529339
+  },
+  {
+    "variable": "radial_velocity",
+    "value": 0,
+    "dr": 0.75,
+    "da": 1.0,
+    "shift": 0.0,
+    "walk": 0.0,
+    "peak_r": 0.0,
+    "peak_x": 0.0,
+    "peak_amplitude": 1.0
+  },
+  {
+    "variable": "radial_velocity",
+    "value": 3,
+    "dr": 0.75,
+    "da": 1.0,
+    "shift": 100.0,
+    "walk": 1.5,
+    "peak_r": 0.0,
+    "peak_x": 100.0,
+    "peak_amplitude": 0.5894901326529339
+  },
+  {
+    "variable": "antenna_length",
+    "value": 0.5,
+    "dr": 0.75,
+    "da": 0.25,
+    "shift": 0.0,
+    "walk": 0.0,
+    "peak_r": 0.0,
+    "peak_x": 0.0,
+    "peak_amplitude": 1.0
+  },
+  {
+    "variable": "antenna_length",
+    "value": 2,
+    "dr": 0.75,
+    "da": 1.0,
+    "shift": 0.0,
+    "walk": 0.0,
+    "peak_r": 0.0,
+    "peak_x": 0.0,
+    "peak_amplitude": 1.0
+  },
+  {
+    "variable": "antenna_length",
+    "value": 5,
+    "dr": 0.75,
+    "da": 2.5,
+    "shift": 0.0,
+    "walk": 0.0,
+    "peak_r": 0.0,
+    "peak_x": 0.0,
+    "peak_amplitude": 1.0
+  }
+]
