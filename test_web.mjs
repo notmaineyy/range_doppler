@@ -1,6 +1,6 @@
 // Independent analytic checks for the browser image former. Run: node test_web.mjs
 import assert from 'node:assert/strict';
-import {compute,windowFactors} from './web/compute.mjs';
+import {compute,windowFactors,spatialResolutions} from './web/compute.mjs';
 const p={B:200,vr:0,L:2,aperture:100,window:'Rectangular',squint:0,compensation:'Stationary scene'};
 const close=(a,b,tol=1e-5)=>assert.ok(Math.abs(a-b)<tol,`${a} != ${b}`);
 const base=await compute(p);
@@ -54,3 +54,18 @@ close(hr/hs,Math.SQRT1_2,1e-9);
 const sidelobes=Array.from(hamming.ap).filter((_,i)=>Math.abs(hamming.xAxis[i])>2.1*hamming.da);
 assert.ok(Math.max(...sidelobes)<-40);
 console.log('Passed: Hamming normalization, focus, half-power DTFT width and sidelobe suppression.');
+
+// Requested resolution equations: explicit SI units and independent factors.
+const eq=spatialResolutions(150e6,75,1.2,1.5);
+close(eq.rangeResolution,1.2);close(eq.azimuthResolution,1.5);
+close(spatialResolutions(300e6,150,1.2,1.5).rangeResolution,.6);
+close(spatialResolutions(300e6,150,1.2,1.5).azimuthResolution,.75);
+for(const sample of [base,hann,hamming,quarter,long,short,extreme]){
+ close(sample.rangeResolution,3e8/(2*sample.params.B*1e6));
+ close(sample.azimuthBroadsideResolution,.03*5000*sample.broadening/(2*sample.syntheticLength));
+ close(sample.azimuthResolution,sample.broadening*sample.da);
+ close(sample.nominalWidth,sample.azimuthResolution*windowFactors(Math.round(sample.T*1600),'Rectangular').bins);
+ assert.ok(Math.abs(sample.width-sample.nominalWidth)<.08);
+}
+await assert.rejects(async()=>spatialResolutions(0,75));
+console.log('Passed: requested SI resolution equations, independent broadening factors, squint geometry and FFT width consistency.');

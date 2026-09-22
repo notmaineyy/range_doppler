@@ -1,3 +1,5 @@
+> **Current complete report:** See [readme_task1.md](readme_task1.md) for the authoritative browser-app equations, resolution readouts and experiments. Material below contains historical explanations and older UI descriptions.
+
 # Current webapp: stationary target and moving SAR aircraft
 
 The current default plot is a fixed 10 m × 10 m close-up with 1 m gridlines and a −40 to 0 dB colour scale to reveal sidelobes. The default 150 MHz bandwidth, 2 m antenna and full rectangular broadside aperture give 1 m range and azimuth first-null references; full −3 dB widths are approximately 0.886 m. The grid remains fixed when resolution changes. A separate overview retains the wider scene.

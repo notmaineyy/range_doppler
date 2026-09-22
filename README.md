@@ -23,7 +23,7 @@ Controls: bandwidth, aircraft radial velocity, physical antenna length, processe
 node test_web.mjs
 ```
 
-Original comparison figures are in `outputs/sar_assignment/`. `SAR_EXPLANATION.md` describes the physics. The browser model checks reproduce reference widths and peak values, check cancellation, and cover the combined parameter extremes. Strong range walk can create multiple nearly equal maxima, so the reported brightest pixel can switch between them.
+Original comparison figures are in `outputs/sar_assignment/`. `readme_task1.md` is the complete current report, including the explicit resolution equations and width conventions. `SAR_EXPLANATION.md` retains historical context. The browser model checks reproduce reference widths and peak values, check cancellation, and cover the combined parameter extremes. Strong range walk can create multiple nearly equal maxima, so the reported brightest pixel can switch between them.
 
 `app.py` is the earlier Streamlit reference view. The scripts `radar.py`, `range_doppler_demo.py`, `range_doppler_interactive.py` and `app_legacy.py` are retained historical experiments and are not the current interactive interface.
 
@@ -70,3 +70,5 @@ works from that sub-path without changes.
 
 
 The weighting selector explicitly labels Rectangular as **None (rectangular / uniform)**: every pulse has equal weight, with no taper. Selecting Hann overlays the analytic finite uniform-aperture reference on the azimuth profile, so sidelobe suppression and mainlobe broadening can be compared at identical geometry and dwell. Both curves use the same stationary unit-peak normalization.
+
+Nominal resolution metrics use δR = cβr/(2B) and δaz = λRβa/(2Lsyn) at broadside. The along-track squint model includes cos²θ in the denominator. Full half-power widths are reported separately; range taper is fixed to None (βr = 1). See `readme_task1.md` for definitions and worked results.

@@ -1,504 +1,322 @@
-# Task 1 — Interactive SAR Range-Doppler Explorer
+# Task 1 — SAR image laboratory: range, azimuth, motion and windowing
 
-**File:** `range_doppler_interactive.py`
-**Depends on:** `range_doppler_demo.py` (signal-processing core; the same core
-also lives in `radar.py`)
-**Companion material:** `task1_slides.pptx` (slide deck), `outputs/slides/*.png`
-(result figures), `make_task1_slides.py` (regenerates them).
+This report describes the **current browser application in `web/`**, including its equations, plots, controls and limitations. It supersedes the earlier report about `range_doppler_interactive.py`. The older Python demonstrations and slide decks are historical material and may use different assumptions.
 
-This document fully describes the task: what the program does, what you see on
-screen, how every control changes the result, the equations the code uses, and
-how the simulation is built. It uses the correct **Synthetic Aperture Radar
-(SAR)** terms and explains them in plain language.
+## 1. Aim and current implementation
 
----
+The task is to explain how a synthetic aperture radar (SAR) forms an **image**, and how bandwidth, aircraft radial velocity, physical antenna length, processed aperture, squint and azimuth weighting affect the image of a point target.
 
-## 1. Summary
+The aircraft moves; the target is **stationary**. The target's reference image location is slant range **5000 m**, azimuth **0 m**, at the centre of the observation. This is an idealized **stripmap** SAR model. A point appearing as a bright spot does not make the acquisition mode “spotlight SAR.”
 
-`range_doppler_interactive.py` is a **SAR simulator with a live graphical
-interface**. It:
+The output is a coherent point impulse response (IPR): a mainlobe and sidelobes in two spatial dimensions. It is not a conventional range–speed detection plot. The intermediate range–Doppler map has frequency on one axis, but the final SAR image has metres on both axes.
 
-1. Places a single **point target** (one bright reflector) on the ground at
-   slant range `R0 = 5 km`.
-2. Simulates the **raw radar echo** a moving SAR platform would receive.
-3. Processes the echo with the **Range-Doppler Algorithm (RDA)**.
-4. Shows two linked panels that redraw **while you drag the sliders**, so you can
-   see exactly how each physical parameter changes the image.
+The current implementation starts **after ideal range compression, aircraft range-migration correction and Doppler-centroid removal**. It uses quadratic phase cancellation and an FFT to focus azimuth. It does not generate raw transmitted/received chirps or implement a complete raw-data Range-Doppler Algorithm (RDA).
 
-Everything is generated from first principles — there is no recorded data — so
-the program is a teaching tool for the physics of SAR image formation.
+## 2. Run and navigate
 
----
+Public site: [SAR image laboratory](https://notmaineyy.github.io/range_doppler/).
 
-## 2. How to run it
+Run the current working copy locally:
 
-From the project root:
-
-```bash
-.venv/bin/python range_doppler_interactive.py
+```sh
+cd /Users/shermi/range_doppler
+python3 server.py
 ```
 
-A window opens with two images, six sliders, a *speckle* checkbox and a *Reset*
-button. Everything redraws live (~12 frames/second). Press **`r`** or click
-**Reset** to return to the defaults.
+Open `http://127.0.0.1:8503/`. This interface needs no third-party Python packages. JavaScript ES modules and a Web Worker perform the calculations in the browser.
 
-Related programs:
+Every numeric control has a slider, direct entry and up/down buttons. Valid changes update the existing plots without a reload. Invalid entries are rejected. Rapid changes are coalesced so intermediate requests do not build an unlimited calculation queue. Runtime depends on the device; the displayed update time is computation timing, not a guaranteed frame rate.
 
-- `range_doppler_demo.py` — the same physics, but writes comparison PNGs to
-  `outputs/` instead of an interactive window.
-- `app.py` — an earlier Streamlit web view.
-- `web/` — a browser version (see `README.md`).
+**Reset to 1 m reference** restores the baseline and logarithmic image display. The 1 m grid stays fixed when parameters change; it is a visual ruler, not a statement that every setting has 1 m resolution.
 
----
+## 3. Scene, symbols and defaults
 
-## 3. Background: what is SAR?
-
-**Radar** transmits radio waves and listens for the part reflected back. From the
-**time** the echo takes, you learn the target's distance. From the **change in
-frequency** of the echo (the Doppler effect), you learn how it moves along the
-line of sight.
-
-**SAR (Synthetic Aperture Radar)** puts the radar on a moving platform. As it
-flies it transmits many pulses and records many echoes of the same patch of
-ground. Combining these echoes makes the system behave like one very long
-antenna — a **synthetic aperture** — despite a physically small antenna. This is
-what gives SAR its fine along-track resolution.
-
-A SAR image has two spatial axes:
-
-- **Slant range** (across-track) — distance from the radar, from **echo delay**:
-  `R = c·τ/2`.
-- **Azimuth** (along-track / cross-range) — position along the flight direction,
-  from the **Doppler history**.
-
-The program also shows the intermediate **range-Doppler** view used to form the
-azimuth axis.
-
-Default scene (in `make_cfg`):
-
-| Quantity | Symbol | Value |
+| Quantity | Symbol | Value or meaning |
 |---|---|---|
-| Carrier frequency | `fc` | 10 GHz (X-band) |
-| Wavelength | `λ = c/fc` | 3 cm |
-| Platform speed | `vp` | 150 m/s |
-| Antenna length | `La` | 2 m |
-| Pulse repetition frequency | `PRF` | 800 Hz |
-| Slant range to target | `R0` | 5000 m |
-| Bandwidth | `B` | 200 MHz |
+| Speed of light used by the model | c | 300,000,000 m/s |
+| Wavelength | λ | 0.03 m; equivalent carrier frequency 10 GHz |
+| Reference slant range | R₀ | 5000 m |
+| Aircraft speed | V | 150 m/s, straight constant-velocity flight |
+| Pulse repetition frequency | PRF | 1600 Hz |
+| Transmitted bandwidth | B | 150 MHz default; 20–500 MHz |
+| Physical along-track antenna length | Lₐ | 2 m default; 0.5–5 m |
+| Processed aperture fraction | α | 1 default; 0.25–1 |
+| Squint from broadside | θ | 0° default; −15° to +15° |
+| Aircraft radial velocity at aperture centre | vᵣ | 0 default; approximately ±38.82 m/s, linked to θ |
+| Processed observation time | T | Derived from antenna length, aperture fraction and squint |
+| Processed synthetic aperture length | Lsyn | VT; aircraft travel distance during processing |
+| Range IPR windowing broadening factor | βᵣ | 1: range has no taper in this app |
+| Azimuth IPR windowing broadening factor | βₐ | Calculated from None, Hann or Hamming |
 
----
+Slant range is the radar-to-target distance. It is not horizontal ground range. Azimuth is the local along-track image coordinate. Physical antenna length **Lₐ** and synthetic aperture length **Lsyn** are different quantities.
 
-## 4. The equations the code uses
-
-These are the exact relations implemented in `derive()` in
-`range_doppler_demo.py`.
+## 4. Required spatial-resolution equations
 
 ### 4.1 Slant-range spatial resolution
 
-```
-δR = (c · b_r) / (2 · B)
-```
+The code explicitly evaluates the requested equation:
 
-- `c` — speed of light (3·10⁸ m/s)
-- `B` — transmitted bandwidth (Hz)
-- `b_r` — **range IPR windowing broadening factor**
+$$\delta_R = \frac{c\,\beta_r}{2B}.$$
 
-The factor `b_r` accounts for the weighting applied along range. With no
-weighting (**rectangular**) the impulse response (IPR) is a `sinc` with its first
-null at `c/(2B)`, so `b_r = 1`. With a **Hann** taper the mainlobe is wider
-(`b_r ≈ 1.30`) but the sidelobes are much lower. This is the classic
-resolution-versus-sidelobe trade-off.
+B is in **Hz**, not MHz. The control value is multiplied by 10⁶. Range weighting is fixed to None, so βᵣ = 1. Increasing bandwidth narrows the range response without moving the target.
 
 ### 4.2 Azimuth spatial resolution
 
-```
-δx = (λ · R0 · b_a) / (2 · L_syn)
-```
+For broadside, the code explicitly evaluates:
 
-- `λ` — wavelength
-- `R0` — slant range to the target
-- `b_a` — **azimuth IPR windowing broadening factor** (1.0 rectangular, ≈1.30 Hann)
-- `L_syn` — **synthetic aperture length**, the along-track distance over which
-  the target is coherently observed
+$$\delta_{az,0} = \frac{\lambda R_0\,\beta_a}{2L_{syn}}.$$
 
-The synthetic aperture length and the illumination time are linked by the
-platform speed:
+The aperture length in this equation is the **processed synthetic aperture length**, not the physical antenna length. A longer processed synthetic aperture improves the nominal azimuth resolution; applying a taper increases βₐ and broadens the response.
 
-```
-L_syn = vp · T_a,proc          T_a,proc = α · T_a          T_a = (R0 · θ) / vp
-θ = λ / La                     (real-antenna beamwidth)
-```
+The current image coordinate is along-track, and the app also supports squint. Its local quadratic model requires:
 
-where `α` is the **processed-aperture fraction** (the slider, 0.25–1.00) and
-`T_a` is the full beam-limited illumination time.
+$$\delta_{az} = \frac{\lambda R_0\,\beta_a}{2L_{syn}\cos^2\theta}.$$
 
-At **full aperture** (`α = 1`) with **rectangular** weighting (`b_a = 1`) this
-reduces to the textbook broadside stripmap result:
+Equivalently, define an **effective along-track aperture**:
 
-```
-δx = (λ · R0) / (2 · R0 · θ) = λ / (2θ) = La / 2
-```
+$$L_{eff}=L_{syn}\cos^2\theta,\qquad
+\delta_{az}=\frac{\lambda R_0\,\beta_a}{2L_{eff}}.$$
 
-So `La/2` is the special case; the general equation above also covers partial
-apertures and windowing.
+This is an algebraic way to include the model's squint geometry, not a claim that the aircraft travels only Leff. At broadside θ = 0, Leff = Lsyn and the requested equation applies directly. The on-screen equations panel shows **both the broadside formula value using Lsyn and the geometry-adjusted along-track value using Leff**. The main azimuth metric reports the latter.
 
-### 4.3 Supporting relations
+Simply omitting the cos²θ correction while keeping the current squinted signal model would make the reported resolution inconsistent with the plotted response. This correction is specific to the local along-track coordinate and approximation used here; it is not a universal high-squint imaging formula.
 
-| Relation | Equation | Notes |
+### 4.3 Resolution convention: nominal value versus actual IPR width
+
+The equations above use a clearly defined **nominal engineering resolution convention**, with β = 1 for uniform weighting. The factors are ratios of full half-power widths at the same aperture:
+
+$$\beta_w = \frac{W_{3dB,w}}{W_{3dB,rect}}.$$
+
+An unwindowed sinc has full half-power width approximately **0.8859 times** its peak-to-first-null separation. Consequently:
+
+$$W_{R,3dB}\approx0.8859\,\delta_R,$$
+
+$$W_{az,3dB}=q_{rect}(N)\,\delta_{az},\qquad q_{rect}(N)\approx0.8859.$$
+
+The app reports nominal resolution in the top metrics and measured full half-power width on the graph. These must not be treated as identical. A nominal 1 m reference produces a full half-power width near 0.886 m. A **weighted nominal resolution is not the weighted first-null position** either.
+
+If one instead wants the requested equations themselves to output full half-power widths, their coefficients must be defined as absolute width coefficients q, rather than rectangle-normalized β. The app deliberately keeps these conventions separate instead of silently exchanging them.
+
+At the 800-pulse baseline:
+
+| Azimuth weighting | βₐ, relative broadening | Full half-power width coefficient q | Nominal resolution | Measured graph width |
+|---|---:|---:|---:|---:|
+| None / Rectangular | 1.000 | ≈0.8859 | 1.000 m | ≈0.882 m |
+| Hann | ≈1.628 | ≈1.4424 | ≈1.628 m | ≈1.441 m |
+| Hamming | ≈1.472 | ≈1.3041 | ≈1.472 m | ≈1.302 m |
+
+Small prediction/measurement differences come from FFT interpolation and the 0.1 m display sampling. In particular, the old report's “Hann ≈1.30” broadening factor was incorrect under this definition.
+
+**Equivalent noise bandwidth (ENBW)** is another quantity: approximately 1.00 bins for Rectangular, 1.50 for Hann and 1.36 for Hamming. ENBW is not the β used in these resolution equations.
+
+## 5. Geometry and supporting equations
+
+### Aircraft radial velocity and squint
+
+Let uLOS be the unit vector from the aircraft toward the stationary target. Positive radial velocity means approaching:
+
+$$v_r=\mathbf{v}\cdot\mathbf{u}_{LOS}=V\sin\theta.$$
+
+The app fixes V and defines squint relative to broadside to that velocity vector, so the two controls are synchronized. At broadside, vᵣ = 0 even though the aircraft moves at 150 m/s. At 15°, vᵣ ≈38.82 m/s.
+
+This relationship does not mean antenna steering can arbitrarily change the radial velocity of an already fixed target. Steering toward another scene centre changes the relevant line of sight. Different aircraft speed, turns, climb or a different angle definition require a more general geometry model.
+
+For straight flight, the centre-target range history is:
+
+$$R(t)=\sqrt{R_0^2-2R_0v_rt+V^2t^2}
+\approx R_0-v_rt+\frac{V^2\cos^2\theta}{2R_0}t^2.$$
+
+The code uses the quadratic approximation, with ideal correction of the associated migration and centroid. The actual target is stationary throughout.
+
+### Dwell, synthetic aperture and Doppler
+
+The physical angular beamwidth reference is approximately λ/Lₐ radians. The model's beam-limited processed dwell is:
+
+$$T_{ideal}=\frac{\alpha R_0\lambda}{VL_a\cos\theta},\quad
+N=\operatorname{round}(PRF\,T_{ideal}),\quad T=\frac{N}{PRF},\quad L_{syn}=VT.$$
+
+Sampling rounds dwell to an integer number of pulses. The positive magnitude of the azimuth chirp rate is:
+
+$$K_a=\frac{2V^2\cos^2\theta}{\lambda R_0}.$$
+
+Other displayed quantities are:
+
+$$f_{dc}=\frac{2v_r}{\lambda},\quad B_D=K_aT,\quad
+\Delta R_{linear}=|v_r|T.$$
+
+The last quantity is the magnitude of the **linear aircraft range-change term** across the aperture. It is not residual blur and not the complete curved range excursion.
+
+At broadside and ignoring pulse-count rounding, the requested azimuth equation reduces to:
+
+$$L_{syn}=\frac{\alpha R_0\lambda}{L_a},\qquad
+\delta_{az}=\frac{\beta_a L_a}{2\alpha}.$$
+
+A longer physical antenna makes a narrower illumination beam, but shortens stripmap dwell and the synthetic aperture. Thus it broadens the focused stripmap image response. Increasing the processed synthetic aperture has the opposite effect. This explains why the bottom-right curve is not an antenna angular beam-pattern plot. [ICEYE's stripmap explanation](https://sar.iceye.com/6.0.4/foundations/OverviewOfSAR/remarkableStory/) discusses this distinction.
+
+## 6. Signal model and actual computation
+
+Let r = R − R₀ and define sinc(u) = sin(πu)/(πu). Before tapering, the ideal range response is:
+
+$$g(r)=\operatorname{sinc}\left(\frac{r}{c/(2B)}\right).$$
+
+After the assumed ideal range compression, aircraft migration correction and centroid removal, the simulated signal is:
+
+$$s(r,t)=g(r)\exp(-j\pi K_at^2).$$
+
+The intermediate map is FFT over slow time t of s(r,t). Its frequency axis is **relative to the removed aircraft Doppler centroid**. The physical centroid can exceed PRF/2 at squint; the app assumes it has been removed before residual slow-time sampling. It does not simulate sampling that high centroid directly and then recovering aliased data.
+
+Azimuth focusing cancels the quadratic phase, applies the selected weights and transforms coherently:
+
+$$I(r,f)=\frac{\operatorname{FFT}_t\{w(t)s(r,t)\exp(+j\pi K_at^2)\}}{\sum_n w[n]},\qquad
+x=\frac{fV}{K_a}.$$
+
+The sum-of-weights normalization keeps a stationary point's peak amplitude at 1 for all windows. It allows shape comparison; it does not model the SNR penalty of weighting. The final point response is separable in this ideal model: a range sinc multiplied by the azimuth aperture response.
+
+For sample index n = 0,…,N−1:
+
+$$w_{none}[n]=1,$$
+
+$$w_{Hann}[n]=0.5-0.5\cos\left(\frac{2\pi n}{N-1}\right),$$
+
+$$w_{Hamming}[n]=0.54-0.46\cos\left(\frac{2\pi n}{N-1}\right).$$
+
+“None” means no taper: every acquired pulse has equal weight. Mathematically, the finite observation interval is still a rectangular window. There is no additional untapered option that removes the finite-aperture sidelobes.
+
+The function `windowFactors()` evaluates the normalized discrete window transform, finds its half-power crossing by bisection, and divides its full width by the rectangular full width. It uses the actual N, not a hard-coded constant for every aperture. Range has no window selector and βᵣ remains 1.
+
+The browser uses an 8192-point azimuth FFT and interpolates magnitude onto fixed 0.1 m image samples. Zero padding and display interpolation do not increase physical resolution. The intermediate map uses a separately padded FFT and coarser display sampling. A Web Worker keeps calculations off the main interface thread.
+
+## 7. What every on-screen result means
+
+### Top metrics and equations panel
+
+- **Nominal slant-range resolution:** cβᵣ/(2B), in metres.
+- **Nominal azimuth resolution:** λR₀βₐ/(2Leff), for the current along-track geometry.
+- **Predicted azimuth displacement:** zero, because the stationary target is focused using the known aircraft trajectory.
+- **Aircraft linear range change:** |vᵣ|T, before ideal compensation.
+- **Measured azimuth −3 dB width:** the full contiguous half-power mainlobe width, interpolated from the displayed response.
+- **Weighting broadening β:** the azimuth window's width ratio to uniform weighting at the same dwell.
+- **Stationary prediction:** the predicted full half-power width, not the nominal resolution metric.
+- **Sampling caption:** dwell, synthetic and physical lengths, removed aircraft centroid, zero residual centroid and nominal Doppler span.
+- **Resolution equations panel:** equations, both factors, Lsyn, Leff, broadside and corrected azimuth values, and predicted range half-power width.
+
+### Upper-left: intermediate range–Doppler map
+
+Horizontal axis: residual Doppler frequency, −800…+800 Hz. Vertical axis: absolute slant range, 4985…5015 m. This is after ideal range and centroid corrections but before azimuth phase cancellation. The cyan line marks zero residual centroid.
+
+A point spreads across Doppler because its phase changes throughout the synthetic aperture. This map is neither a final spatial image nor a target-speed chart. Azimuth window selection does not change this pre-window intermediate map. Its own peak is normalized to 0 dB.
+
+### Upper-right: focused SAR image with 1 m grid
+
+Horizontal axis: azimuth −5…+5 m. Vertical axis: absolute slant range 4995…5005 m. The view is a fixed 10 m square with equal spatial scale and 1 m gridlines. Cyan marks the true centre-time point; green marks the predicted position. They coincide in this stationary compensated model.
+
+A finite-bandwidth, finite-aperture point has a mainlobe plus sidelobes, not an infinitely narrow pixel. The default −40…0 dB view makes the sidelobes visible in nearby grid squares. Those lobes belong to the same reflector. Linear power emphasizes the central spot instead. With low bandwidth or very short processed aperture, the response can extend beyond this close-up; inspect the wider overview and profiles.
+
+### Bottom-left profile: range IPR
+
+A vertical slice through the brightest image pixel: horizontal plot axis is slant range in metres, vertical plot axis is relative power in dB. The large central peak is the range mainlobe; the smaller oscillations are range sidelobes. Higher B narrows it. Azimuth tapering does not suppress these range sidelobes.
+
+### Bottom-right profile: focused azimuth IPR
+
+A horizontal slice through the brightest image pixel at a fixed slant range. Horizontal plot axis: along-track offset from the predicted centre, −10…+10 m. Vertical axis: relative power, −60…0 dB.
+
+The central peak is the azimuth mainlobe. Smaller peaks are sidelobes of that same point. They are not additional targets and this is not antenna gain versus angle. The yellow dashed line is half power (−3.0103 dB relative to the peak); the shaded region and bracket mark full half-power width. A narrower mainlobe means finer spatial detail, though two-target distinguishability also depends on relative strength and sidelobes.
+
+For Hann or Hamming, cyan is the selected weighted response and dashed grey is the analytic finite uniform-aperture reference at the same geometry and dwell. Both use unit peak. The reference uses the finite Dirichlet response, not an unrelated Gaussian curve. Hann and Hamming lower sidelobes while widening the peak. Hamming's weak sidelobes become visible on the −60 dB profile even when they are below the image's −40 dB floor.
+
+### Full-scene overview and diagnostics
+
+The overview retains fixed azimuth −220…+220 m and range 4985…5015 m. Its spatial axes do not auto-rescale with controls. Max pooling during image downsampling keeps narrow peaks visible but is not added resolution. Diagnostics explain motion compensation, window factors and the difference between physical and synthetic aperture lengths.
+
+### Colour, amplitude and power
+
+For normalized complex amplitude I:
+
+$$D=20\log_{10}|I|=10\log_{10}|I|^2.$$
+
+Thus 0 dB is reference power 1, −20 dB is 0.01 and −40 dB is 0.0001. The final image and profiles share the stationary unit-peak reference; only the intermediate map normalizes independently. The data are floored at −80 dB, the image displays to −40 dB, and profiles display to −60 dB. A dark pixel can therefore contain nonzero energy below the colour floor.
+
+## 8. Controls and expected effects
+
+| Control | What changing it does | Position effect in this model |
 |---|---|---|
-| Range from delay | `R = c·τ / 2` | `τ` = two-way echo delay |
-| Doppler rate | `Ka = fR = 2·vp² / (λ·R0)` | slope of the Doppler history |
-| Doppler bandwidth | `Bd = 2·vp / La` | span of Doppler collected |
-| Doppler centroid | `f_dc = 2·vr / λ` | shift from radial velocity |
-| Azimuth displacement | `Δx = vr · R0 / vp` | apparent position error |
-| Range walk | `ΔR = vr · T_a,proc` | range drift during aperture |
+| Bandwidth, 20–500 MHz | Higher B narrows range response and lowers δR; azimuth resolution unchanged | None |
+| Aircraft radial velocity, approximately ±38.82 m/s | Updates squint; changes physical Doppler centroid, dwell and azimuth geometry | None after ideal trajectory correction |
+| Physical antenna length, 0.5–5 m | Longer antenna narrows illumination beam, shortens stripmap aperture and broadens azimuth IPR | None |
+| Processed aperture, 25–100% | Larger fraction increases T and Lsyn, narrows azimuth response and increases collected Doppler span | None |
+| Squint, ±15° | Updates vᵣ; changes Ka and T; finite squint slightly worsens along-track resolution here | None after ideal trajectory correction |
+| None / Hann / Hamming | Changes azimuth IPR, βₐ and nominal azimuth resolution; no range taper is applied | None |
+| Log / linear image scale | Changes display visibility of weak features, not the signal or resolution | None |
+| Reset to 1 m reference | Restores all baseline controls and log image scale | Baseline position |
 
-### 4.4 Worked numbers for the default scene
+Aircraft radial velocity must not be interpreted as target velocity. The earlier simulation's target-motion displacement and butterfly-like uncompensated response are not part of the current model. Conversely, this ideal stationary model cannot demonstrate errors from an incorrectly known aircraft trajectory.
 
-With `B = 200 MHz`, `La = 2 m`, rectangular weighting, full aperture:
+## 9. Reproducible findings
 
-| Quantity | Value |
+Reset before each experiment and change only the listed setting. Values below come from the current browser compute module; “azimuth resolution” uses the requested nominal convention, and measured width uses the separate half-power definition.
+
+| Experiment | Range resolution | Azimuth resolution | Measured azimuth half-power width | Synthetic length |
+|---|---:|---:|---:|---:|
+| Baseline: B=150 MHz, Lₐ=2 m, α=100%, None, θ=0 | 1.000 m | 1.000 m | 0.882 m | 75.000 m |
+| B=500 MHz | 0.300 m | 1.000 m | 0.882 m | 75.000 m |
+| Lₐ=4 m | 1.000 m | 2.000 m | 1.770 m | 37.500 m |
+| α=50% | 1.000 m | 2.000 m | 1.770 m | 37.500 m |
+| Hann | 1.000 m | 1.628 m | 1.441 m | 75.000 m |
+| Hamming | 1.000 m | 1.472 m | 1.302 m | 75.000 m |
+| θ=+15°, vᵣ≈+38.82 m/s | 1.000 m | 1.036 m | 0.912 m | 77.625 m |
+
+All peaks remain at (range 5000 m, azimuth 0 m). At 15°, the effective aperture is about 72.425 m, less than the physical travel distance 77.625 m; the removed centroid is about 2588.19 Hz. Negative squint gives the opposite centroid but the same ideal width.
+
+At baseline the equations can be evaluated directly:
+
+$$\delta_R=\frac{3\times10^8\times1}{2\times150\times10^6}=1\text{ m},$$
+
+$$\delta_{az}=\frac{0.03\times5000\times1}{2\times75}=1\text{ m}.$$
+
+A useful presentation sequence is: reset; increase bandwidth; reset and increase physical antenna length; reset and reduce aperture fraction; compare None/Hann/Hamming; reset and change squint. Explain mainlobe width, sidelobe visibility and correct peak position separately.
+
+## 10. Code map and validation
+
+| File / function | Current responsibility |
 |---|---|
-| `δR = c/(2B)` | **0.75 m** |
-| `θ = λ/La` | 0.015 rad |
-| `T_a` | 0.50 s |
-| `L_syn` | 75 m |
-| `δx = λR0/(2L_syn) = La/2` | **1.00 m** |
-| `Bd = 2vp/La` | 150 Hz |
-| `f_dc` at `vr = 1 m/s` | 67 Hz |
+| `web/index.html` | Controls, plot descriptions, equations and model limits |
+| `web/app.mjs` | Synchronized inputs, metrics, 1 m image grid, profiles and reference overlay |
+| `web/compute.mjs::compute()` | Ideal corrected signal, coherent FFT image, fixed axes and measured width |
+| `web/compute.mjs::spatialResolutions()` | Requested resolution equations, explicit β factors and squint correction |
+| `web/compute.mjs::windowFactors()` | Actual discrete-window half-power width and rectangle-relative broadening |
+| `web/worker.mjs` | Background calculation and transferable arrays |
+| `server.py` | Local static server for the same web files |
+| `test_web.mjs` | Browser-model numerical regression tests |
+| `.github/workflows/pages.yml` | Publishes `web/` to GitHub Pages when main is pushed |
 
-If you change the processed aperture to 50%, `L_syn` halves to 37.5 m and `δx`
-**doubles** to 2.00 m — less observation time means a coarser azimuth response.
-With Hann weighting the reported `δR` and `δx` grow by the `b` factors.
+Run:
 
----
-
-## 5. What you see on screen
-
-The window has **two image panels**, a **live read-out line**, and the controls.
-
-### 5.1 Left panel — the Range-Doppler map
-
-Data **after range compression** but **before azimuth compression**. Axes:
-
-- **x = Range [m]** — distance to the target.
-- **y = Doppler frequency [Hz]** — frequency shift caused by motion.
-
-A point target is **not** a point here: its energy is spread across a band of
-Doppler frequencies of width `Bd`, centred on the Doppler centroid `f_dc`. A cyan
-dashed line marks `f_dc`; a white dotted line marks 0 Hz. The bright vertical
-streak shows the target's range. This is *what the radar measures before
-focusing*.
-
-### 5.2 Right panel — the fully compressed SAR image
-
-The final image **after the azimuth matched filter**. Axes:
-
-- **x = Range [m]** (distance),
-- **y = Azimuth [m]** (along-track position, `x = vp·t`).
-
-The target collapses to a **single sharp point** at `(R0, x0)`. Its width is the
-resolution: range width ≈ `δR`, azimuth width ≈ `δx`.
-
-### 5.3 Colour scale and read-out
-
-Both panels are shown in **decibels (dB)**, normalised so the strongest point is
-0 dB, with a display floor of −60 dB. Yellow = strong echo, dark purple = weak.
-Decibels let a very bright target and faint detail share one image.
-
-The read-out line shows the current values of the equations:
-
-```
-δR = c·b_r/2B         (m, with the range broadening factor b_r)
-δx = λ·R0·b_a/2L_syn  (m, with the azimuth broadening factor b_a and L_syn)
-f_dc = 2vr/λ          (Hz)
-Bd = 2vp/La           (Hz)
-Na                    (number of azimuth samples)
+```sh
+node --check web/app.mjs
+node test_web.mjs
 ```
 
----
+Checks cover the sinc range cut, stationary position, signed aircraft radial geometry, centroid removal, fixed axes, aperture/antenna scaling, squint, Hann/Hamming normalization and half-power widths, Hamming sidelobe suppression, requested resolution equations, invalid parameters and cancellation. Predicted half-power width is cross-checked against the FFT image width within display-sampling tolerance.
 
-## 6. The controls and what each changes
+The static Pages deployment runs the same files; there is no server-side simulation. A local edit is not automatically on the public site until it is committed, pushed and the Pages workflow succeeds.
 
-> **Clarity** = how sharp/tall the focused response is.
-> **Position** = where the peak appears in the image.
-> Some controls affect clarity only; one affects position.
+The older `sar_model.py`, `app.py`, `radar.py`, `range_doppler_demo.py`, `range_doppler_interactive.py` and previous slides are not the current webapp's processing path. Their historical moving-target or noise controls should not be used to explain this interface.
 
-### 6.1 Bandwidth `B` — 20 … 500 MHz (default 200)
+## 11. Scope and limitations
 
-- **Equation:** `δR = c·b_r / (2B)`.
-- **Effect:** increasing `B` narrows the range mainlobe → sharper in range. At
-  50 → 500 MHz, `δR` goes from ~3 m to ~0.3 m.
-- **Position:** unchanged — the peak stays at `R0 = 5000 m`.
-- **Lesson:** *bandwidth buys range clarity, not position.*
+- One stationary point, ideal known straight aircraft trajectory; no moving targets, trajectory errors or autofocus.
+- Local quadratic range/phase approximation, ±15° squint; no exact high-squint geolocation, higher-order coupling or terrain geometry.
+- Ideal range compression, migration and pre-sampling centroid correction are assumed, not implemented from raw echoes.
+- No noise, speckle, antenna gain, radiometry or realistic scene reflectivity. Unit-peak normalization hides the SNR cost of windowing.
+- Uniform range spectrum; βᵣ is explicitly 1. There is no range-window control.
+- Fixed wavelength, reference range, speed and PRF. Their appearances in equations explain the model but do not imply extra UI controls.
+- Finite display sampling limits measured widths, especially for the narrowest responses. A 1 m grid cell, a 0.1 m sample and physical resolution are different things.
+- First-null spacing, full half-power width, nominal resolution and ENBW are distinct quantities. Definitions accompany every reported factor.
 
-### 6.2 Radial velocity `v_r` — −5 … +5 m/s (default 0)
+## 12. References and terminology
 
-Velocity along the **line of sight**; positive = approaching.
+[ESA: Introduction to a SAR System](https://www.esa.int/Enabling_Support/Space_Engineering_Technology/Onboard_Data_Processing/Introduction_to_a_SAR_System) provides SAR image-formation context. [MathWorks: sarazres](https://www.mathworks.com/help/radar/ref/sarazres.html) describes synthetic aperture length and azimuth broadening inputs; its broadside example uses the requested λRβ/(2L) form. Always check width conventions before transferring numerical factors between sources.
 
-- **Equation:** `f_dc = 2·v_r / λ`, and apparent azimuth shift `Δx = v_r·R0/vp`.
-- **Effect:** the whole Doppler band slides up/down, so the target **moves along
-  the Doppler axis**. The range also drifts during the aperture (**range walk**
-  `v_r·T_a,proc`), which can smear the response.
-- **Position:** changed — a genuine **position error** for a target the processor
-  assumes is stationary. If large, the target leaves the synthetic aperture and
-  **defocuses**.
-- **Lesson:** *radial velocity moves the target (and can smear it).*
+[ICEYE: The Remarkable Story of SAR](https://sar.iceye.com/6.0.4/foundations/OverviewOfSAR/remarkableStory/) explains physical versus synthetic aperture and stripmap versus spotlight. [Harris: On the Use of Windows for Harmonic Analysis with the DFT](https://amst.ece.iastate.edu/paper/comparative_study/window_1.pdf) is the window-analysis reference. The app's factors are calculated from its own discrete weights, rather than copied without a width definition.
 
-### 6.3 Antenna length `L_a` — 0.5 … 5 m (default 2)
-
-- **Equations:** `δx = λR0b_a / (2 L_syn)`; at full aperture `= La/2`. Also
-  `Bd = 2vp/La` and `θ = λ/La`.
-- **Effect:** a **shorter** antenna → **wider** beam → **longer** illumination →
-  **larger** `L_syn` → **finer** azimuth resolution (narrower mainlobe) and a
-  **wider** Doppler band.
-- **Position:** unchanged — the peak stays at `x0 = 0`.
-- **Lesson:** *antenna length buys azimuth clarity, not position.*
-
-### 6.4 Target along-track velocity `v_t` — 0 … 80 m/s (default 0)
-
-Velocity **along the flight direction**.
-
-- **Effect:** a moving target has a different **Doppler rate** than the
-  stationary filter expects. The residual **quadratic phase error** defocuses the
-  azimuth response — it smears into a broad, dimmer blob.
-- **Position:** roughly unchanged; the peak drops and spreads.
-- **Lesson:** *along-track velocity destroys clarity; it does not move the
-  target.*
-
-### 6.5 Processed aperture `α` — 25 … 100 % (default 100)
-
-The fraction of the full illumination time that is coherently processed.
-
-- **Equations:** `T_a,proc = α·T_a`, `L_syn = vp·T_a,proc`, and therefore
-  `δx = λR0b_a / (2 L_syn)`.
-- **Effect:** processing **less** of the aperture shortens `L_syn` and
-  **broadens** the azimuth response (worse `δx`). It also reduces the range walk
-  of a moving target, because there is less time for the range to drift.
-- **Position:** unchanged.
-- **Lesson:** *azimuth clarity needs observation time; partial apertures trade
-  clarity for robustness.*
-
-### 6.6 SNR and speckle
-
-- **SNR slider — −10 … +40 dB (default 30):** sets the signal-to-noise ratio of
-  the compressed image. Lower SNR raises the noise floor until the target is
-  buried. (40 dB disables the added noise.)
-- **Speckle checkbox:** enables **multiplicative speckle** — the grainy texture
-  of real SAR images. It arises when many sub-resolution scatterers add with
-  random phases, giving a **Rayleigh** amplitude distribution.
-- **Effect:** both reduce **detectability / clarity**; neither changes position.
-- **Lesson:** *noise and speckle cost clarity, not position.*
-
-### 6.7 Summary table
-
-| Control | Symbol | Affects `δR`? | Affects `δx`? | Affects position? | Key equation |
-|---|---|---|---|---|---|
-| Bandwidth | `B` | **Yes** (∝1/B) | No | No | `δR = c·b_r/(2B)` |
-| Radial velocity | `v_r` | No | No | **Yes** | `f_dc = 2v_r/λ`, `Δx = v_rR0/vp` |
-| Antenna length | `L_a` | No | **Yes** (via `L_syn`, `θ`) | No | `δx = λR0b_a/(2L_syn)` |
-| Along-track velocity | `v_t` | No | Defocus | ~No | Doppler-rate mismatch |
-| Processed aperture | `α` | No | **Yes** (∝1/`L_syn`) | No | `L_syn = vp·α·T_a` |
-| Window weighting | `b_r`,`b_a` | **Yes** | **Yes** | No | broadening factors |
-| SNR / speckle | — | No | No | No | noise floor / Rayleigh |
-
----
-
-## 7. Methodology: how the simulation works
-
-This section follows the signal from raw echo to finished image. The physics is
-in `range_doppler_demo.py`; `range_doppler_interactive.py` drives it and adds the
-display.
-
-### 7.1 Geometry and derived quantities — `derive()`
-
-From `{fc, B, La, vp, R0, aperture_fraction, windows}` the code computes `λ`,
-`θ = λ/La`, `T_a = R0·θ/vp`, `T_a,proc = α·T_a`, `L_syn = vp·T_a,proc`,
-`Ka = 2vp²/(λR0)`, `Bd = 2vp/La`, and the two resolutions
-`δR = c·b_r/(2B)` and `δx = λR0·b_a/(2L_syn)`.
-
-### 7.2 Two time axes
-
-- **Fast time** — time within one pulse; the **range** axis.
-- **Slow time** — pulse-to-pulse time; the **azimuth** axis.
-
-`slow_time` samples the processed aperture at the PRF: `Na = PRF·T_a,proc`
-samples centred on 0. `fast_time` samples the range window around `R0`.
-
-### 7.3 Raw echo — `slant_range()` + `raw_echo()`
-
-For each slow-time instant `t_m`, `slant_range` computes the instantaneous
-two-way path:
-
-```
-across = R0 − v_r·t_m
-along  = (vp − v_t·t_m) ... i.e. (vp − vt)·t_m − x0
-R(t_m) = sqrt(across² + along²)
-```
-
-The received baseband echo is then a **chirp** delayed by `2R/c`:
-
-```
-s(t̂, t_m) = exp(−j·4π·R(t_m)/λ) · exp(+j·π·Kr·(t̂ − 2R/c)²)
-```
-
-- the first exponential carries the **Doppler history** (the azimuth phase),
-- the second is the **range chirp** with rate `Kr = B/Tp`.
-
-The result is a 2-D complex array (slow × fast time).
-
-### 7.4 Range compression — `range_compress()`
-
-Each pulse is **matched-filtered** against the transmitted chirp (FFT-based, with
-the optional range window applied to the reference). This is **pulse
-compression**: it turns the long chirp echo into a short, sharp peak whose
-position is the range and whose width is `δR = c·b_r/(2B)`.
-
-### 7.5 Azimuth FFT → the Range-Doppler map
-
-`rda_compress` takes an FFT along slow time, transforming the Doppler history
-into the Doppler-frequency domain — the **Range-Doppler map** (left panel). Here
-the target's energy spans the Doppler bandwidth `Bd` around `f_dc`.
-
-### 7.6 Azimuth matched filter (the Range-Doppler Algorithm)
-
-In the same function, each Doppler bin is multiplied by the azimuth reference
-
-```
-H(f_a) = exp(−j·π·f_a² / Ka)     (optionally × a Hann taper)
-```
-
-the matched filter for the quadratic Doppler history, then an **inverse FFT**
-returns to the spatial azimuth axis. The energy collapses to a single point
-(right panel). Applying the azimuth filter in the **Doppler domain** is exactly
-the **Range-Doppler Algorithm**, and it is what keeps the program fast enough for
-live updates.
-
-### 7.7 Noise, speckle and display
-
-`simulate()` normalises the focused image, optionally multiplies by **speckle**
-(unit-mean complex Gaussian → Rayleigh magnitude), optionally adds **thermal
-noise** at the chosen SNR, and converts both panels to **dB** with `to_dB`. A
-**fixed random seed** prevents speckle/noise flicker while moving unrelated
-sliders.
-
-### 7.8 Why it is fast
-
-All steps are vectorised NumPy, and the azimuth filter is a single FFT-based
-multiply rather than a per-range-bin convolution. A full simulate-and-redraw is
-roughly 80–100 ms.
-
----
-
-## 8. Code map
-
-| Location | What it does |
-|---|---|
-| `range_doppler_demo.py::make_cfg` | Default scene and the window/aperture options. |
-| `range_doppler_demo.py::derive` | All derived quantities and the two resolution equations. |
-| `range_doppler_demo.py::slow_time` / `fast_time` | Azimuth / range sample axes. |
-| `range_doppler_demo.py::slant_range` | Target geometry including platform and target motion. |
-| `range_doppler_demo.py::raw_echo` | Chirp + Doppler-phase raw signal. |
-| `range_doppler_demo.py::range_compress` | Range matched filter with the range window. |
-| `range_doppler_demo.py::azimuth_compress` | Time-domain azimuth matched filter (batch/PNG use). |
-| `range_doppler_demo.py::axes` | Doppler, range and azimuth coordinate axes. |
-| `range_doppler_interactive.py::rda_compress` | Doppler-domain azimuth filter (the live RDA path). |
-| `range_doppler_interactive.py::to_dB` | Magnitude → decibels for display. |
-| `range_doppler_interactive.py::simulate` | Full pipeline used by the GUI. |
-| `range_doppler_interactive.py::Explorer` | Figure, sliders, checkbox, Reset; wires callbacks and the read-out. |
-| `radar.py` | Plotting-free copy of the core for the web app and slides. |
-
----
-
-## 9. Results you can reproduce interactively
-
-Defaults unless stated. Figures are generated by `make_task1_slides.py` into
-`outputs/slides/` and included in `task1_slides.pptx`.
-
-- **Baseline** — `B=200 MHz`, `La=2 m`: the target focuses to a bright point at
-  (5000 m, 0 m). `δR = 0.75 m`, `δx = 1.00 m`, `Bd = 150 Hz`.
-- **Bandwidth** — `B` = 50 → 500 MHz narrows the range mainlobe ~3 m → ~0.3 m;
-  the peak never moves.
-- **Radial velocity** — `v_r` = 0, 1, 2 m/s shifts the Doppler band to
-  +0, +67, +133 Hz; the target moves along Doppler and range-walks.
-- **Antenna length** — `La` = 1, 2, 4 m gives `δx` = 0.5, 1.0, 2.0 m (shorter =
-  sharper), all centred at 0 m.
-- **Along-track velocity** — `v_t` = 40, 80 m/s turn the sharp azimuth spike into
-  a broad, low smear (defocus).
-- **Processed aperture** — 100 / 50 / 25 % gives `δx` = 1, 2, 4 m.
-- **Windowing** — switching to Hann widens `δR`/`δx` by ≈1.3× but suppresses
-  sidelobes.
-- **SNR / speckle** — lowering SNR raises the noise floor; speckle adds grainy
-  Rayleigh texture.
-
----
-
-## 10. Assumptions and limitations
-
-A deliberately simple, **educational** model — not a full SAR processor.
-
-- **One point target**, not a scene of many scatterers. The speckle demo is
-  therefore illustrative rather than a true multi-scatterer simulation.
-- **Broadside geometry, no squint**; straight, constant-velocity path.
-- **No range-cell migration correction (RCMC)** is applied. For these parameters
-  the migration is below a range cell, so it does not matter; at large squint or
-  long apertures it would.
-- **Parabolic (quadratic) approximation** of the Doppler history.
-- **Idealised antenna pattern**, no platform attitude/roll.
-- **Windowing broadening factors are scalar constants** (1.0 / 1.30) applied for
-  reporting the resolution; the actual taper is applied to the reference/weights.
-- Noise and speckle are added at the **image level** for a clear, fast demo.
-
-These simplifications are standard for teaching the Range-Doppler Algorithm; the
-qualitative lessons (what sets range vs azimuth clarity, and what moves a target)
-hold in a full processor.
-
----
-
-## 11. Glossary of SAR terms
-
-| Term | Meaning |
-|---|---|
-| **Range / slant range** | Radar-to-target distance, from echo delay: `R = c·τ/2`. |
-| **Azimuth / cross-range** | Along-track position, from the Doppler history. |
-| **Slant-range resolution `δR`** | Smallest separable range: `c·b_r/(2B)` (first null). |
-| **Azimuth resolution `δx`** | Smallest separable along-track distance: `λR0b_a/(2L_syn)`. |
-| **IPR (impulse response)** | The focused shape of a point target (a `sinc`-like peak). |
-| **Windowing / weighting / taper** | Amplitude shaping that lowers sidelobes but widens the mainlobe. |
-| **Broadening factor `b`** | How much a window widens the mainlobe vs rectangular (≈1.30 for Hann). |
-| **Chirp** | A pulse whose frequency sweeps across bandwidth `B`. |
-| **Pulse / range compression** | Matched filtering that sharpens the chirp echo in range. |
-| **Doppler history** | How the echo frequency changes as the platform passes the target. |
-| **Doppler rate `Ka`** | Slope of the Doppler history: `2vp²/(λR0)`. |
-| **Doppler centroid `f_dc`** | Mean Doppler shift; `2v_r/λ` for a moving target. |
-| **Doppler bandwidth `Bd`** | Span of Doppler collected: `2vp/La`. |
-| **Synthetic aperture `L_syn`** | Along-track distance the target is coherently observed: `vp·T_a,proc`. |
-| **Beamwidth `θ`** | Antenna beam angular width: `λ/La`. |
-| **Processed aperture `α`** | Fraction of the full illumination time processed. |
-| **Fast time / slow time** | Time within a pulse (range) / between pulses (azimuth). |
-| **PRF** | Pulse Repetition Frequency — pulses per second. |
-| **Range-Doppler Algorithm (RDA)** | Process range first, then azimuth via the Doppler domain. |
-| **Matched filter** | Optimal filter for detecting a known signal in noise. |
-| **RCMC** | Range-Cell Migration Correction — fixes a target drifting across range bins. |
-| **Speckle** | Grainy multiplicative noise (Rayleigh) from many sub-resolution scatterers. |
-| **SNR** | Signal-to-Noise Ratio. |
-| **dB (decibel)** | Logarithmic power scale; lets bright and faint features share an image. |
-
----
-
-## 12. Files for this task
-
-| File | Contents |
-|---|---|
-| `readme_task1.md` | This document. |
-| `range_doppler_interactive.py` | The interactive program. |
-| `range_doppler_demo.py` | Core physics + batch figures. |
-| `task1_slides.pptx` | Slide deck version of this material. |
-| `make_task1_slides.py` | Regenerates the figures and the deck. |
-| `outputs/slides/*.png` | Result figures (geometry, pipeline, baseline, bandwidth, radial, antenna, along-track, SNR/speckle). |
-
-Regenerate the figures and deck:
-
-```bash
-.venv/bin/python make_task1_slides.py
-```
+**IPR:** response to one ideal point. **Mainlobe:** central peak. **Sidelobes:** smaller responses from that same point. **RCMC:** range-cell migration correction. **PRF:** pulse repetition frequency. **Slow time:** time across aircraft pulses. **Fast time:** echo delay within a pulse, already compressed into range here. **Doppler centroid:** centre frequency of the phase history. **Synthetic aperture:** the coherent aircraft travel interval, distinct from the physical antenna.

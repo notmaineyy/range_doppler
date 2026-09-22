@@ -36,6 +36,9 @@ export async function compute(p, cancelled=()=>false, yieldWork=async()=>{}){
  const T=n/1600,dr=150/B,da=150/(rate*T),shift=0;
  const fd=0,fdResidual=0,platformCentroid=2*aircraftRadialVelocity/.03,dx=1600/N*150/rate;
  const factors=windowFactors(n,window);
+ // Requested engineering resolution equations, with explicit window factors.
+ // Along-track squint needs the cos² geometry correction in this local model.
+ const resolutions=spatialResolutions(B*1e6,150*T,1,factors.beta,squint);
  const times=new Float64Array(n),wr=new Float64Array(n),wi=new Float64Array(n),rr=new Float64Array(n),ri=new Float64Array(n);
  let sum=0;
  for(let k=0;k<n;k++){
@@ -82,7 +85,7 @@ export async function compute(p, cancelled=()=>false, yieldWork=async()=>{}){
  for(let i=0;i<rd.length;i++)rd[i]=db(rd[i]/rdPeak);
  for(let i=0;i<rp.length;i++)rp[i]=db(rp[i]);for(let i=0;i<ap.length;i++)ap[i]=db(ap[i]);
  return {image,rd,rp,ap,rAxis,xAxis,cols:NR,rows,dcols:DCOLS,drows:DROWS,dr,da,T,shift,fd,walk:Math.abs(aircraftRadialVelocity)*T,width,peak,peakR:rAxis[peakCol],peakX:xAxis[peakRow],Bd:rate*T,rate,platformCentroid,aircraftRadialVelocity,syntheticLength:150*T,
-   broadening:factors.beta,windowWidthBins:factors.bins,nominalWidth:factors.bins*da,rectWidth:factors.rect*da,compensated,squint,params:{...p,squint,compensation}};
+   ...resolutions,broadening:factors.beta,windowWidthBins:factors.bins,nominalWidth:factors.bins*da,rectWidth:factors.rect*da,compensated,squint,params:{...p,squint,compensation}};
 }
 
 // Full half-power width in units of 1/T. Evaluate the actual discrete window,
@@ -107,4 +110,18 @@ export function windowFactors(n,window){
 function windowWeight(k,n,kind){
  const cosine=Math.cos(2*Math.PI*k/(n-1));
  return kind==='Hann'?.5-.5*cosine:kind==='Hamming'?.54-.46*cosine:1;
+}
+
+// Nominal engineering resolution: beta=1 for uniform weighting. Measured
+// half-power width is a separate quantity (~0.886 times nominal for rectangular).
+export function spatialResolutions(bandwidthHz,syntheticLength,rangeBroadening=1,azimuthBroadening=1,squintDeg=0){
+ const c=3e8,wavelength=.03,range=5000;
+ if(![bandwidthHz,syntheticLength,rangeBroadening,azimuthBroadening,squintDeg].every(Number.isFinite)||bandwidthHz<=0||syntheticLength<=0||rangeBroadening<=0||azimuthBroadening<=0||Math.abs(squintDeg)>15.000001)throw Error('Invalid resolution parameters.');
+ const effectiveAperture=syntheticLength*Math.cos(squintDeg*Math.PI/180)**2;
+ return {
+  rangeBroadening,azimuthBroadening,effectiveAperture,
+  rangeResolution:c*rangeBroadening/(2*bandwidthHz),
+  azimuthBroadsideResolution:wavelength*range*azimuthBroadening/(2*syntheticLength),
+  azimuthResolution:wavelength*range*azimuthBroadening/(2*effectiveAperture)
+ };
 }
