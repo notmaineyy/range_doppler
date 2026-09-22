@@ -194,13 +194,13 @@ def fig_bandwidth():
         s = _range_slice(ac, R_axis)
         ax.plot(R_axis, 20 * np.log10(s + 1e-9), lw=1.3)
         ax.axvline(5000, color="r", ls="--", lw=0.9)
-        ax.set_title(f"B = {B/1e6:.0f} MHz   (dR = {radar.C/(2*B):.2f} m)")
+        ax.set_title(f"B = {B/1e6:.0f} MHz   (dR = {d['dR']:.2f} m)")
         ax.set_xlabel("Range [m]")
         ax.set_ylabel("Normalised power [dB]")
         ax.set_xlim(4985, 5015)
         ax.set_ylim(-40, 2)
         ax.grid(alpha=0.3)
-    fig.suptitle("Bandwidth B sets RANGE clarity (dR = c/2B); target stays at R0",
+    fig.suptitle("Bandwidth B sets RANGE clarity (dR = c*b_r/2B); target stays at R0",
                  fontsize=12)
     fig.tight_layout()
     p = os.path.join(FIG, "bandwidth.png")
@@ -242,15 +242,15 @@ def fig_antenna():
         s = _azimuth_slice(ac, x_axis)
         ax.plot(x_axis, 20 * np.log10(s + 1e-9), lw=1.3)
         ax.axvline(0, color="r", ls="--", lw=0.9)
-        ax.set_title(f"$L_a$ = {La:.0f} m   (rho_az = {La/2:.1f} m, "
-                     f"Bd = {2*150/La:.0f} Hz)")
+        ax.set_title(f"$L_a$ = {La:.0f} m   (rho_az = {d['rho_az']:.1f} m, "
+                     f"Bd = {d['Bd']:.0f} Hz)")
         ax.set_xlabel("Azimuth [m]")
         ax.set_ylabel("Normalised power [dB]")
         ax.set_xlim(-25, 25)
         ax.set_ylim(-40, 2)
         ax.grid(alpha=0.3)
-    fig.suptitle("Antenna length La sets AZIMUTH clarity (rho_az = La/2); "
-                 "target stays at x0", fontsize=12)
+    fig.suptitle("Antenna length La sets AZIMUTH clarity "
+                 "(rho_az = lam*R0*b_a/(2*L_syn)); target stays at x0", fontsize=12)
     fig.tight_layout()
     p = os.path.join(FIG, "antenna.png")
     fig.savefig(p, dpi=DPI, bbox_inches="tight")
@@ -472,8 +472,10 @@ def build_deck(figs):
         "Simulates a single point target and processes it with the Range-Doppler Algorithm.",
         "Left panel: the Range-Doppler map (range vs Doppler frequency).",
         "Right panel: the fully compressed SAR image (range vs azimuth).",
-        "Five sliders + one checkbox update both panels live (~12 frames/second).",
-        "Live read-out: dR, rho_az, f_dc, Bd, Na.",
+        "Six sliders + one checkbox update both panels live (~12 frames/second).",
+        "Sliders: bandwidth, radial velocity, antenna length, along-track velocity,",
+        ("processed aperture, SNR. Checkbox: speckle.", 1),
+        "Live read-out: dR, rho_az (with broadening factors), f_dc, Bd, Na.",
         "Press 'r' or click Reset to return to defaults.",
     ])
 
@@ -502,20 +504,20 @@ def build_deck(figs):
     add_picture_slide(
         prs, "Variable 1 - Bandwidth B", figs["bandwidth"],
         bullets=[
-            "Range resolution dR = c / (2B).",
+            "Slant-range resolution dR = c * b_r / (2B).",
+            "b_r = range IPR windowing broadening factor (1.0 rect, ~1.3 Hann).",
             "Wider B -> narrower mainlobe -> sharper in range.",
             "Target POSITION does not move: peak stays at R0.",
-            "Clarity only, not position.",
         ],
         width=9.6,
     )
 
     add_picture_slide(
-        prs, "Variable 2 - Radial velocity vr", figs["radar"] if False else figs["radial"],
+        prs, "Variable 2 - Radial velocity vr", figs["radial"],
         bullets=[
             "Doppler centroid f_dc = 2 vr / lambda.",
             "Shifts the target along the Doppler axis.",
-            "Also causes range walk (vr * Ta).",
+            "Also causes range walk (vr * T_a,proc).",
             "Uncompensated -> azimuth position error and smearing.",
         ],
         width=9.6,
@@ -524,10 +526,10 @@ def build_deck(figs):
     add_picture_slide(
         prs, "Variable 3 - Antenna length La", figs["antenna"],
         bullets=[
-            "Azimuth resolution rho_az = La / 2.",
+            "Azimuth resolution rho_az = lam*R0*b_a / (2*L_syn).",
+            "L_syn = vp*T_a,proc = synthetic aperture length.",
+            "Full aperture, rect: reduces to rho_az = La / 2.",
             "Doppler bandwidth Bd = 2 vp / La.",
-            "Shorter antenna -> wider beam -> finer azimuth resolution.",
-            "Target POSITION does not move: peak stays at x0.",
         ],
         width=9.6,
     )
@@ -542,8 +544,16 @@ def build_deck(figs):
         width=9.6,
     )
 
+    add_bullets(prs, "Variable 5 - Processed aperture alpha", [
+        "Fraction of the full beam-limited illumination time processed.",
+        "T_a,proc = alpha * Ta,   L_syn = vp * T_a,proc.",
+        "rho_az = lam*R0*b_a / (2*L_syn): less aperture -> coarser azimuth.",
+        "At 100/50/25%, rho_az = 1 / 2 / 4 m.",
+        "Also reduces moving-target range walk.",
+    ])
+
     add_picture_slide(
-        prs, "Variable 5 - SNR and speckle", figs["snr_speckle"],
+        prs, "Variable 6 - SNR and speckle", figs["snr_speckle"],
         bullets=[
             "Low SNR -> noise floor rises, target buried.",
             "Speckle = multiplicative Rayleigh noise (grainy texture).",
@@ -557,37 +567,45 @@ def build_deck(figs):
         prs, "Results at a glance: what affects clarity vs position",
         ["Variable", "Affects clarity", "Affects position", "Key formula"],
         [
-            ["Bandwidth B", "Range clarity", "No", "dR = c / 2B"],
+            ["Bandwidth B", "Range clarity", "No", "dR = c*b_r/(2B)"],
             ["Radial velocity vr", "Defocus if large", "Doppler / azimuth", "f_dc = 2vr/lambda"],
-            ["Antenna length La", "Azimuth clarity", "No", "rho_az = La/2"],
+            ["Antenna length La", "Azimuth clarity", "No", "rho_az = lam*R0*b_a/(2*L_syn)"],
+            ["Processed aperture", "Azimuth clarity", "No", "L_syn = vp*alpha*Ta"],
             ["Along-track velocity vt", "Azimuth defocus", "~No", "Doppler-rate mismatch"],
             ["SNR / speckle", "Detectability", "No", "noise floor / Rayleigh"],
         ],
     )
 
     add_bullets(prs, "Cheat sheet: the equations", [
-        "Range resolution:            dR = c / (2B)",
-        "Azimuth resolution:          rho_az = La / 2",
-        "Doppler bandwidth:           Bd = 2 vp / La",
-        "Doppler rate:                fR = 2 vp^2 / (lambda R0)",
-        "Doppler centroid (moving):   f_dc = 2 vr / lambda",
-        "Synthetic aperture time:     Ta = R0 * theta / vp,  theta = lambda / La",
-        "Range to target:             R = c * tau / 2",
-    ], size=19)
+        "Slant-range resolution:  dR = c * b_r / (2B)",
+        "Azimuth resolution:      rho_az = lam * R0 * b_a / (2 * L_syn)",
+        "Synthetic aperture:      L_syn = vp * T_a,proc,  T_a,proc = alpha * Ta",
+        "Full aperture, rect:     rho_az = La / 2",
+        "Doppler bandwidth:       Bd = 2 vp / La",
+        "Doppler rate:            Ka = 2 vp^2 / (lambda R0)",
+        "Doppler centroid:        f_dc = 2 vr / lambda",
+        "Beamwidth:               theta = lambda / La,  Ta = R0 * theta / vp",
+        "Range to target:         R = c * tau / 2",
+    ], size=17)
 
     add_bullets(prs, "Glossary of SAR terms", [
         "Range - distance to target, from echo delay.",
         "Azimuth / cross-range - along-track position, from Doppler.",
+        "Slant-range resolution - smallest separable range, c*b_r/(2B).",
+        "Azimuth resolution - smallest separable along-track distance, lam*R0*b_a/(2*L_syn).",
+        "IPR - impulse response; the focused shape of a point target.",
+        "Window broadening factor - how much a taper widens the mainlobe (~1.3 Hann).",
+        "Synthetic aperture L_syn - along-track extent of coherent observation.",
+        "Processed aperture alpha - fraction of the illumination time used.",
         "Slant range R0 - straight-line distance from radar to target.",
         "Chirp - a pulse whose frequency sweeps over time.",
         "Pulse / range compression - matched filtering that sharpens echoes in range.",
         "Doppler history - the changing echo frequency as the platform passes the target.",
         "Doppler centroid - the mean Doppler shift (zero for a still target broadside).",
-        "Synthetic aperture - the long effective antenna formed by platform motion.",
         "PRF - pulses per second; must be high enough to sample the Doppler.",
         "RDA (Range-Doppler Algorithm) - process range first, then azimuth via Doppler.",
         "Speckle - grainy noise from many small scatterers in one resolution cell.",
-    ], size=14)
+    ], size=12)
 
     add_bullets(prs, "Key takeaways & how to run", [
         "Range clarity is set by BANDWIDTH; azimuth clarity by ANTENNA LENGTH.",

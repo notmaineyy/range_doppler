@@ -8,16 +8,24 @@ Run (from the project root)::
 Use the sliders / checkbox and watch the range-Doppler map (left) and the
 fully-compressed SAR image (right) update live.
 
+Equations implemented (see range_doppler_demo.derive)
+-----------------------------------------------------
+* Slant-range resolution : dR     = c * b_r / (2 * B)
+                           b_r    = range IPR windowing broadening (1.0 rect, ~1.3 Hann)
+* Azimuth resolution     : rho_az = lam * R0 * b_a / (2 * L_syn)
+                           L_syn  = processed synthetic aperture length
+                           b_a    = azimuth IPR broadening (1.0 rect, ~1.3 Hann)
+                           (full aperture + rectangular reduces to rho_az = La/2)
+
 Toggles
 -------
-* Bandwidth B          : range resolution dR = c/(2B)  (clarity, not position)
-* Radial velocity vr   : Doppler centroid f_dc = 2*vr/lam and range walk
+* Bandwidth B          : range resolution dR = c*b_r/(2B)   (clarity, not position)
+* Radial velocity vr   : Doppler centroid f_dc = 2*vr/lam + range walk
                          (position error along Doppler / azimuth)
-* Antenna length La    : azimuth resolution rho_az = La/2 and Doppler
-                         bandwidth Bd = 2*vp/La  (clarity, not position)
+* Antenna length La    : beamwidth theta = lam/La -> L_syn and rho_az  (clarity)
 * Along-track velocity : azimuth filter mismatch -> defocus (clarity)
-* SNR / speckle        : image-domain noise floor and multiplicative Rayleigh
-                         speckle (detectability / clarity)
+* Processed aperture   : fraction of illumination time -> L_syn and rho_az (clarity)
+* SNR / speckle        : image-domain noise + Rayleigh speckle (detectability)
 
 The azimuth matched filter is applied in the Doppler (frequency) domain, which
 is exactly the Range-Doppler Algorithm and keeps updates fast enough for
@@ -39,6 +47,8 @@ C = rd.C
 def rda_compress(cfg, d, rc):
     f_a, _, _, _, Na, _ = rd.axes(cfg, d)
     H = np.exp(-1j * np.pi * f_a ** 2 / d["fR"])      # azimuth reference
+    if d.get("azimuth_window", "Rectangular") == "Hann":
+        H = H * np.hanning(len(f_a))
     rd_map = np.fft.fftshift(np.fft.fft(rc, axis=0), axes=0)
     ac = np.fft.ifft(np.fft.ifftshift(rd_map * H[:, None], axes=0), axis=0)
     return rd_map, ac
@@ -53,10 +63,11 @@ def to_dB(x, floor=1e-6):
 # --------------------------------------------------------------------------- #
 # Full simulation -> two display images + readout metadata
 # --------------------------------------------------------------------------- #
-def simulate(base_cfg, t_f, B, vr, La, vt, snr, speckle, rng):
+def simulate(base_cfg, t_f, B, vr, La, vt, snr, speckle, rng, aperture=1.0):
     cfg = dict(base_cfg)
     cfg["B"] = B
     cfg["La"] = La
+    cfg["aperture_fraction"] = aperture
     d = rd.derive(cfg)
     t_m = rd.slow_time(cfg, d)
     R = rd.slant_range(cfg, t_m, vr=vr, vt=vt)
@@ -80,6 +91,9 @@ def simulate(base_cfg, t_f, B, vr, La, vt, snr, speckle, rng):
     f_a, R_axis, x_axis, _, Na, Nr = rd.axes(cfg, d)
     fd = 2.0 * vr / d["lam"]
     meta = dict(dR=d["dR"], rho_az=d["rho_az"], Bd=d["Bd"], fd=fd, Na=Na,
+                Nr=Nr, Ta=d["Ta"], Ta_proc=d["Ta_proc"], L_syn=d["L_syn"],
+                theta=d["theta"], lam=d["lam"], ap=d["ap"], b_r=d["b_r"],
+                b_a=d["b_a"], R0=cfg["R0"],
                 R_axis=R_axis, x_axis=x_axis, f_a=f_a)
     return rd_disp, im_disp, meta
 
@@ -106,6 +120,7 @@ class Explorer:
             ("Radial vel. $v_r$ [m/s]", -5.0, 5.0, 0.0),
             ("Antenna length $L_a$ [m]", 0.5, 5.0, 2.0),
             ("Along-track vel. $v_t$ [m/s]", 0.0, 80.0, 0.0),
+            ("Processed aperture [%]", 25.0, 100.0, 100.0),
             ("SNR [dB]", -10.0, 40.0, 30.0),
         ]
         y = 0.26
@@ -115,7 +130,7 @@ class Explorer:
             sl = Slider(ax, label, lo, hi, valinit=init)
             sl.on_changed(self.update)
             self.sliders[label] = sl
-            y -= 0.045
+            y -= 0.041
 
         ax_chk = self.fig.add_axes([0.08, 0.31, 0.12, 0.06])
         self.chk = CheckButtons(ax_chk, ["speckle"], [False])
@@ -134,15 +149,16 @@ class Explorer:
         vr = s["Radial vel. $v_r$ [m/s]"].val
         La = s["Antenna length $L_a$ [m]"].val
         vt = s["Along-track vel. $v_t$ [m/s]"].val
+        ap = s["Processed aperture [%]"].val / 100.0
         snr = s["SNR [dB]"].val
         speckle = bool(self.chk.get_status()[0])
-        return B, vr, La, vt, snr, speckle
+        return B, vr, La, vt, snr, speckle, ap
 
     def update(self, val=None):
-        B, vr, La, vt, snr, speckle = self._vals()
+        B, vr, La, vt, snr, speckle, ap = self._vals()
         rng = np.random.default_rng(0)      # fixed seed -> no flicker
         rd_disp, im_disp, meta = simulate(self.base_cfg, self.t_f, B, vr, La,
-                                          vt, snr, speckle, rng)
+                                          vt, snr, speckle, rng, ap)
 
         Ra = meta["R_axis"]; xa = meta["x_axis"]; fa = meta["f_a"]
 
@@ -173,11 +189,11 @@ class Explorer:
         if self.txt is None:
             self.txt = self.fig.text(0.5, 0.355, "", ha="center", fontsize=11)
         self.txt.set_text(
-            f"dR = c/2B = {meta['dR']:.2f} m    "
-            f"rho_az = La/2 = {meta['rho_az']:.2f} m    "
+            f"dR = c*b_r/2B = {meta['dR']:.2f} m (b_r={meta['b_r']:.2f})    "
+            f"rho_az = lam*R0*b_a/2L_syn = {meta['rho_az']:.2f} m "
+            f"(b_a={meta['b_a']:.2f}, L_syn={meta['L_syn']:.0f} m)    "
             f"f_dc = 2vr/lam = {meta['fd']:+6.0f} Hz    "
-            f"Bd = 2vp/La = {meta['Bd']:.0f} Hz    "
-            f"Na = {meta['Na']}")
+            f"Bd = 2vp/La = {meta['Bd']:.0f} Hz    Na = {meta['Na']}")
 
         self.fig.canvas.draw_idle()
 
@@ -186,6 +202,7 @@ class Explorer:
                             ("Radial vel. $v_r$ [m/s]", 0.0),
                             ("Antenna length $L_a$ [m]", 2.0),
                             ("Along-track vel. $v_t$ [m/s]", 0.0),
+                            ("Processed aperture [%]", 100.0),
                             ("SNR [dB]", 30.0)]:
             self.sliders[label].set_val(init)
         if self.chk.get_status()[0]:

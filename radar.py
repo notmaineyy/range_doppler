@@ -10,10 +10,11 @@ inside headless web servers.
 Image axes
 ----------
 * Range axis  : fast-time (echo delay), R = c*tau/2.  Clarity set by the
-                range resolution  dR = c/(2*B)  (the BANDWIDTH B).
+                slant-range resolution  dR = c*b_r/(2*B)  (the BANDWIDTH B).
 * Doppler axis: slow-time (platform motion).  The ANTENNA LENGTH La sets the
                 beamwidth  theta = lam/La  -> Doppler bandwidth Bd = 2*vp/La
-                and azimuth resolution  rho_az = La/2.
+                and azimuth resolution  rho_az = lam*R0*b_a/(2*L_syn)
+                (full aperture + rectangular reduces to La/2).
 """
 
 import numpy as np
@@ -35,25 +36,45 @@ def make_cfg():
         PRF=800.0,      # pulse repetition frequency [Hz]
         R0=5.0e3,       # slant range to scene center [m]
         swath=300.0,    # half-width of the range window [m]
+        aperture_fraction=1.0,        # fraction of full aperture processed
+        range_window="Rectangular",  # range IPR weighting
+        azimuth_window="Rectangular",  # azimuth IPR weighting
     )
     return cfg
 
 
 def derive(cfg):
+    """Derived geometry and the two spatial resolutions.
+
+    dR = c * b_r / (2 * B)
+    rho_az = lam * R0 * b_a / (2 * L_syn)
+
+    L_syn = vp * aperture_fraction * Ta is the processed synthetic aperture
+    length; at full aperture with rectangular weighting rho_az reduces to La/2.
+    """
     lam = C / cfg["fc"]
     Kr = cfg["B"] / cfg["Tp"]                  # chirp rate
     theta = lam / cfg["La"]                    # azimuth beamwidth
-    Ta = cfg["R0"] * theta / cfg["vp"]         # synthetic aperture time
+    Ta = cfg["R0"] * theta / cfg["vp"]         # full synthetic aperture time
     fR = 2.0 * cfg["vp"] ** 2 / (lam * cfg["R0"])  # Doppler rate
     Bd = 2.0 * cfg["vp"] / cfg["La"]           # Doppler bandwidth
-    dR = C / (2.0 * cfg["B"])                  # range resolution
-    rho_az = cfg["La"] / 2.0                   # azimuth resolution (SAR)
-    return dict(lam=lam, Kr=Kr, theta=theta, Ta=Ta, fR=fR, Bd=Bd, dR=dR,
-                rho_az=rho_az)
+
+    B_ROAD = {"Rectangular": 1.0, "Hann": 1.30}
+    b_r = B_ROAD[cfg.get("range_window", "Rectangular")]
+    b_a = B_ROAD[cfg.get("azimuth_window", "Rectangular")]
+    ap = cfg.get("aperture_fraction", 1.0)
+    Ta_proc = ap * Ta
+    L_syn = cfg["vp"] * Ta_proc
+
+    dR = C * b_r / (2.0 * cfg["B"])                        # slant-range resolution
+    rho_az = lam * cfg["R0"] * b_a / (2.0 * L_syn)         # azimuth resolution
+    return dict(lam=lam, Kr=Kr, theta=theta, Ta=Ta, Ta_proc=Ta_proc,
+                L_syn=L_syn, fR=fR, Bd=Bd, dR=dR, rho_az=rho_az,
+                b_r=b_r, b_a=b_a, ap=ap)
 
 
 def slow_time(cfg, d):
-    Na = int(np.round(cfg["PRF"] * d["Ta"]))
+    Na = int(np.round(cfg["PRF"] * d["Ta_proc"]))
     Na += Na % 2                                   # keep even
     t = (np.arange(Na) - Na / 2) / cfg["PRF"]      # centred on t = 0
     return t
@@ -95,12 +116,20 @@ def raw_echo(cfg, d, t_m, t_fast, R, A=1.0):
     return data
 
 
+def _window(name, n):
+    """IPR weighting: Rectangular (factor 1.0) or Hann (mainlobe x~1.30)."""
+    if name == "Hann":
+        return np.hanning(n)
+    return np.ones(n)
+
+
 def range_compress(cfg, d, data):
     """Matched-filter each slow-time row with the transmit chirp (FFT based)."""
     Na, Nr = data.shape
     Np = int(round(cfg["Tp"] * cfg["Fs"]))
     t_ref = np.arange(Np) / cfg["Fs"]
     ref = np.exp(1j * np.pi * d["Kr"] * t_ref ** 2)
+    ref = ref * _window(d.get("range_window", "Rectangular"), Np)
     nfft = int(2 ** np.ceil(np.log2(Nr + Np - 1)))
     H = np.conj(np.fft.fft(ref, nfft))
     rc = np.fft.ifft(np.fft.fft(data, nfft, axis=1) * H, axis=1)[:, :Nr]
@@ -118,6 +147,7 @@ def azimuth_compress(cfg, d, rc, fR=None):
     if fR is None:
         fR = d["fR"]
     h = np.exp(1j * np.pi * fR * t_m ** 2)          # conj. of received quadratic
+    h = h * _window(d.get("azimuth_window", "Rectangular"), len(t_m))
     out = np.empty_like(rc)
     for n in range(rc.shape[1]):
         out[:, n] = np.convolve(rc[:, n], h, mode="same")
@@ -129,6 +159,8 @@ def rda_compress(cfg, d, rc):
     Algorithm) -- fast enough for real-time toggling."""
     f_a = doppler_axis(cfg, d)
     H = np.exp(-1j * np.pi * f_a ** 2 / d["fR"])    # azimuth reference
+    if d.get("azimuth_window", "Rectangular") == "Hann":
+        H = H * np.hanning(len(f_a))
     rd_map = np.fft.fftshift(np.fft.fft(rc, axis=0), axes=0)
     ac = np.fft.ifft(np.fft.ifftshift(rd_map * H[:, None], axes=0), axis=0)
     return rd_map, ac
@@ -202,6 +234,7 @@ def simulate(base_cfg, t_f, B, vr, La, vt, snr, speckle, rng):
     f_a, R_axis, x_axis, _, Na, Nr = axes(cfg, d)
     fd = 2.0 * vr / d["lam"]
     meta = dict(dR=d["dR"], rho_az=d["rho_az"], Bd=d["Bd"], fd=fd, Na=Na,
-                Nr=Nr, Ta=d["Ta"], lam=d["lam"],
+                Nr=Nr, Ta=d["Ta"], Ta_proc=d["Ta_proc"], L_syn=d["L_syn"],
+                lam=d["lam"], ap=d["ap"], b_r=d["b_r"], b_a=d["b_a"],
                 R_axis=R_axis, x_axis=x_axis, f_a=f_a)
     return rd_disp, im_disp, meta

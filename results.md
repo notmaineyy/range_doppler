@@ -26,6 +26,17 @@ In plain words:
   different as possible"**.
 - `eps` is a tiny safety number (0.000001) so we never divide by zero.
 
+A **second calculation** is benchmarked in section 4a — a statistics-normalised
+ratio that first computes global scalars (median and standard deviations) and
+then one elementwise pass:
+
+```
+I1 / (I2 + 0.1*median(I1)) + std1 / (std2 + 0.1*median(std1))
+```
+
+The rest of the document (sections 3-3b) concern the first formula; section 4a
+covers the second.
+
 ---
 
 ## 2. Test setup
@@ -79,13 +90,13 @@ Same 1.1e9-pixel problem, same expression, varying only the number of CPU cores
 numexpr is allowed to use (`--threads 1|2|4|8|10`). Result memory is fixed per
 run: **8.80 GB for float64**, **4.40 GB for float32**.
 
-| CPU cores (threads) | float64 time | float64 Gpixel/s | float32 time | float32 Gpixel/s |
-|--:|--:|--:|--:|--:|
-| 1 | 3.853 s | 0.29 | 3.155 s | 0.35 |
-| 2 | 1.559 s | 0.71 | 1.607 s | 0.68 |
-| 4 | 0.804 s | 1.37 | 0.825 s | 1.33 |
-| 8 | 0.596 s | 1.85 | 0.620 s | 1.77 |
-| 10 | 0.604 s | 1.82 | **0.550 s** | **2.00** |
+| CPU cores (threads) | float64 time | float32 time |
+|--:|--:|--:|
+| 1 | 3.853 s | 3.155 s |
+| 2 | 1.559 s | 1.607 s |
+| 4 | 0.804 s | 0.825 s |
+| 8 | 0.596 s | 0.620 s |
+| 10 | 0.604 s | **0.550 s** |
 
 Speed-up relative to a single thread (same data, different view):
 
@@ -103,7 +114,7 @@ Speed-up relative to a single thread (same data, different view):
   memory bus is saturated, so extra cores add little (float64 even dips slightly
   at 10 cores). This is a memory-bandwidth-bound calculation.
 - **float32 is at least as fast as float64 at every core count**, and clearly
-  faster with one core (0.35 vs 0.29 Gpixel/s) because it moves half the bytes.
+  faster with one core (3.155 s vs 3.853 s) because it moves half the bytes.
   With all 10 cores both land around 0.55-0.60 s.
 - **The ~8x win over numpy comes almost entirely from using all 10 cores.** With
   1 thread, numexpr matches numpy (see Method 5).
@@ -116,17 +127,15 @@ Speed-up relative to a single thread (same data, different view):
 ## 4. All methods compared (1.1 billion pixels, `uint8` inputs)
 
 This is the single table with every version. Times are the calculation only.
-`ns/pixel` and `Gpixel/s` let you compare fairly; lower `ns/pixel` / higher
-`Gpixel/s` is better.
 
-| # | Method | Compute / result type | CPU cores | Time | ns/pixel | Gpixel/s | Result size | Notes |
-|--:|---|---|--:|--:|--:|--:|--:|---|
-| 1 | numpy naive (literal) | float32 | 1 | 10.74 s | 9.77 | 0.10 | 4.40 GB | spilled to disk (swap) |
-| 2 | numpy in-place (`out=`) | float32 | 1 | ~1.8 s | ~1.6 | ~0.62 | 4.40 GB | ranged 1.8–4.0 s with memory pressure |
-| 3 | numpy naive (literal) | float16 | 1 | 16.93 s | 15.39 | 0.06 | 2.20 GB | float16 is slow on CPU |
-| 4 | numpy in-place (`out=`) | float16 | 1 | 15.27 s | 13.88 | 0.07 | 2.20 GB | float16 is slow on CPU |
-| 5 | numexpr `casting='safe'` | float64 | 10 | 0.514 s | 0.47 | 2.14 | 8.80 GB | fastest; result is 2x memory |
-| 6 | **numexpr forced `out=float32`** (32-bit) | **float32** | **10** | **0.486 s** | **0.44** | **2.26** | **4.40 GB** | same speed as #5, half the memory |
+| # | Method | Compute / result type | CPU cores | Time | Result size | Notes |
+|--:|---|---|--:|--:|--:|---|
+| 1 | numpy naive (literal) | float32 | 1 | 10.74 s | 4.40 GB | spilled to disk (swap) |
+| 2 | numpy in-place (`out=`) | float32 | 1 | ~1.8 s | 4.40 GB | ranged 1.8–4.0 s with memory pressure |
+| 3 | numpy naive (literal) | float16 | 1 | 16.93 s | 2.20 GB | float16 is slow on CPU |
+| 4 | numpy in-place (`out=`) | float16 | 1 | 15.27 s | 2.20 GB | float16 is slow on CPU |
+| 5 | numexpr `casting='safe'` | float64 | 10 | 0.514 s | 8.80 GB | fastest; result is 2x memory |
+| 6 | **numexpr forced `out=float32`** (32-bit) | **float32** | **10** | **0.486 s** | **4.40 GB** | same speed as #5, half the memory |
 
 All methods produced the same answer to within rounding: the checksum at 1.1e9
 is `4.275743e+08` for every float32/float64 method (float16 differs slightly,
@@ -137,24 +146,102 @@ is `4.275743e+08` for every float32/float64 method (float16 differs slightly,
 At this smaller size nothing swaps, so these numbers are stable and show the
 "true" speed of each method.
 
-| # | Method | Type | Cores | Time | ns/pixel | Gpixel/s | Result size |
-|--:|---|---|--:|--:|--:|--:|--:|
-| 1 | numpy naive | float32 | 1 | 0.624 s | 2.08 | 0.48 | 1.20 GB |
-| 2 | numpy in-place | float32 | 1 | 0.339 s | 1.13 | 0.89 | 1.20 GB |
-| 3 | numpy naive | float16 | 1 | 4.544 s | 15.15 | 0.07 | 0.60 GB |
-| 4 | numpy in-place | float16 | 1 | 4.114 s | 13.71 | 0.07 | 0.60 GB |
-| 5 | numexpr | float64 | 10 | 0.142 s | 0.47 | 2.11 | 2.40 GB |
-| 6 | numexpr forced (32-bit) | float32 | 10 | 0.116 s | 0.39 | 2.60 | 1.20 GB |
+| # | Method | Type | Cores | Time | Result size |
+|--:|---|---|--:|--:|--:|
+| 1 | numpy naive | float32 | 1 | 0.624 s | 1.20 GB |
+| 2 | numpy in-place | float32 | 1 | 0.339 s | 1.20 GB |
+| 3 | numpy naive | float16 | 1 | 4.544 s | 0.60 GB |
+| 4 | numpy in-place | float16 | 1 | 4.114 s | 0.60 GB |
+| 5 | numexpr | float64 | 10 | 0.142 s | 2.40 GB |
+| 6 | numexpr forced (32-bit) | float32 | 10 | 0.116 s | 1.20 GB |
 
 **Key observations**
 
 - **#6 is the winner overall**: fastest *and* no more memory than numpy float32.
-- **#5 and #6 are the same speed** (0.47 vs 0.44 ns/pixel) — forcing float32
+- **#5 and #6 are the same speed** (0.514 s vs 0.486 s) — forcing float32
   costs nothing in time and saves 4.40 GB.
 - **#2 is ~2x faster than #1** (in-place beats the literal one-liner).
 - **#3/#4 (float16) are ~12x slower than float32** despite using half the
   memory.
 - **#1 at 1.1e9 is 10x slower than its 300M rate** purely because it swapped.
+
+---
+
+## 4a. A second calculation: statistics-normalised ratio
+
+A different, statistics-based calculation on the same two `uint8` images:
+
+```
+I1 / (I2 + 0.1*median(I1))  +  std1 / (std2 + 0.1*median(std1))
+```
+
+where `median(I1)` is the scalar median of image `I1`, and `std1`, `std2` are the
+scalar standard deviations of `I1` and `I2`. Because `std1` is a scalar,
+`median(std1)` is simply `std1`, so the second term is a constant:
+
+```
+c1 = 0.1 * median(I1)            # added inside the division
+c2 = std1 / (std2 + 0.1 * std1)  # a scalar offset
+out = I1 / (I2 + c1) + c2
+```
+
+This is **two stages**: a **global reduction** (median + two standard deviations)
+that produces two scalars, then a single **elementwise pass**. The elementwise
+pass is timed with the same three variants; the reduction is timed separately.
+
+Script: `normdiff_extra.py` (`--pixels`, `--in-dtype`, `--mode`, `--threads`,
+`--seed`).
+
+### Elementwise pass
+
+| pixels | Method | Type | Cores | Elementwise time | Result size |
+|--:|---|---|--:|--:|--:|
+| 1.1e9 | numpy naive | float32 | 1 | 1.354 s | 4.40 GB |
+| 1.1e9 | numpy in-place | float32 | 1 | 1.255 s | 4.40 GB |
+| 1.1e9 | **numexpr forced 32-bit** | float32 | 10 | **0.286 s** | 4.40 GB |
+| 3.0e8 | numpy naive | float32 | 1 | 0.472 s | 1.20 GB |
+| 3.0e8 | numpy in-place | float32 | 1 | 0.221 s | 1.20 GB |
+| 3.0e8 | **numexpr forced 32-bit** | float32 | 10 | **0.068 s** | 1.20 GB |
+
+All three variants produced the identical checksum (`2.692861e+09` at 1.1e9,
+`7.344372e+08` at 3.0e8), so the fast forms are correct.
+
+### The reduction (median + 2 std)
+
+| pixels | Reduction time |
+|--:|--:|
+| 1.1e9 | 10.714 s |
+| 3.0e8 | 2.488 s |
+
+The reduction costs about **10-30x more than the numexpr elementwise pass**. The
+exact median costs the most: it partitions a copy of the image
+(`numpy.partition`), which is `O(n)` but with random access and a full pass. The
+two `std` calls add two more passes.
+
+### Totals (reduction + elementwise)
+
+| pixels | Method | Reduction | Elementwise | Total |
+|--:|---|---|--:|--:|
+| 1.1e9 | numpy naive | 10.714 s | 1.354 s | 12.068 s |
+| 1.1e9 | numpy in-place | 10.714 s | 1.255 s | 11.969 s |
+| 1.1e9 | numexpr 32-bit | 10.714 s | 0.286 s | 11.000 s |
+| 3.0e8 | numpy naive | 2.488 s | 0.472 s | 2.959 s |
+| 3.0e8 | numpy in-place | 2.488 s | 0.221 s | 2.709 s |
+| 3.0e8 | numexpr 32-bit | 2.488 s | 0.068 s | 2.556 s |
+
+### What this shows
+
+- **The reduction dominates.** At 1.1e9 px the median + standard deviations cost
+  ~10.7 s, while the best elementwise pass is ~0.29 s. Optimising the elementwise
+  part from 1.354 s to 0.286 s (4.7x) only improves the total by ~11%.
+- **numexpr still wins the elementwise stage** — 0.286 s versus 1.255-1.354 s for
+  the numpy variants. This calculation is a good fit for numexpr because it is a
+  pure elementwise expression with no full-size temporaries and no reduction.
+- **The median is the bottleneck.** For speed, replace the exact median with an
+  approximate one (subsample, P² algorithm) or a cheaper statistic (mean). The
+  standard deviations can also be fused into a single pass instead of two.
+- **The formula itself is cheap; the statistics are expensive.** This is a useful
+  general lesson: measure the whole pipeline, not just the inner loop.
 
 ---
 
@@ -333,8 +420,6 @@ ne.evaluate("abs(I1 - I2) / (I1 + I2 + eps)",
 
 - **Memory bandwidth** — how fast numbers move between the processor and memory.
   This calculation is **limited by moving data**, not by arithmetic.
-- **ns/pixel** — how long one pixel takes (smaller is better).
-- **Gpixel/s** — billions of pixels processed per second (bigger is better).
 - **In RAM** — the data fits in the computer's working memory; fast.
 - **Swap / swap-bound** — when data does not fit, the computer uses the **hard
   disk as overflow** (your desk is full, so you keep running to a filing
@@ -366,6 +451,10 @@ ne.evaluate("abs(I1 - I2) / (I1 + I2 + eps)",
 - **When reporting timings, always state**: input format, compute format, number
   of cores, and whether it fit in memory. Each changes the result by large
   factors. Timings also vary (~30%) with background load and memory state.
+- **Measure the whole pipeline.** In the statistics-normalised ratio (section
+  4a) the median/standard-deviation reduction cost ~10.7 s while the optimised
+  elementwise pass cost only ~0.29 s — optimising the inner loop barely changed
+  the total.
 
 ---
 
@@ -392,8 +481,14 @@ ne.evaluate("abs(I1 - I2) / (I1 + I2 + eps)",
 for t in 1 2 4 8 10; do
   .venv/bin/python normdiff_numexpr.py --pixels 1.1e9 --mode numexpr --threads $t
 done
+
+# statistics-normalised ratio (section 4a): reduction + elementwise
+.venv/bin/python normdiff_extra.py --pixels 1.1e9
+.venv/bin/python normdiff_extra.py --pixels 3e8 --mode naive inplace numexpr
 ```
 
 Options: `normdiff_benchmark.py` accepts `--pixels`, `--in-dtype`,
 `--compute-dtype`, `--mode`, `--seed`. `normdiff_numexpr.py` accepts `--pixels`,
 `--in-dtype`, `--mode`, `--threads`, `--out-dtype`, `--seed`.
+`normdiff_extra.py` accepts `--pixels`, `--in-dtype`, `--mode`, `--threads`,
+`--seed`.

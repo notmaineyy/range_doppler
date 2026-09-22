@@ -1,8 +1,24 @@
+# Current webapp: stationary target and moving SAR aircraft
+
+The current default plot is a fixed 10 m × 10 m close-up with 1 m gridlines and a −40 to 0 dB colour scale to reveal sidelobes. The default 150 MHz bandwidth, 2 m antenna and full rectangular broadside aperture give 1 m range and azimuth first-null references; full −3 dB widths are approximately 0.886 m. The grid remains fixed when resolution changes. A separate overview retains the wider scene.
+
+The aircraft flies at a fixed speed V = 150 m/s. The target is stationary. The radial-velocity control now means **aircraft line-of-sight velocity at aperture centre**, positive approaching. It is linked to squint through vr = V sinθ: edit either control and the other updates. The ±15° squint domain corresponds to approximately ±38.82 m/s radial velocity. At broadside vr is zero despite the aircraft moving at 150 m/s.
+
+The local range history is R(t) ≈ R0 − vr t + V² cos²θ t²/(2R0). Aircraft motion produces Doppler centroid 2vr/λ and range migration. The educational processor assumes ideal trajectory-based migration and centroid compensation, then focuses the quadratic phase. Thus a stationary target remains a focused spot at range 5000 m, azimuth 0 m, rather than inheriting a moving-target displacement or butterfly pattern. Squint still changes dwell, Doppler rate and the predicted azimuth width.
+
+The displayed intermediate map is **after** ideal migration and centroid correction, not raw echoes. Its frequency axis is relative to the removed physical aircraft centroid. The linear range-change metric |vr|T is the magnitude of the aircraft's centre-time linear range change over the aperture; it is not residual image blur or the complete curved range excursion. The complete raw-data processor and higher-order squint geometry are outside this approximation.
+
+See [MathWorks’ aircraft SAR example](https://www.mathworks.com/help/radar/ug/synthetic-aperture-radar-system-simulation-and-image-formation.html) for the platform/target distinction.
+
+The current browser regressions check both radial-velocity signs, stationary focus, linked squint geometry, removed centroid, fixed axes, antenna/aperture scaling and Hann factors. The Python/Streamlit examples and material below are **historical moving-target experiments**, not the current browser control semantics.
+
+---
+
 # Understanding range and Doppler in a SAR image
 
 A SAR image locates scattering energy in two spatial dimensions: **range** across the flight track and **azimuth** along it. Range comes from echo delay, R = cτ/2. Doppler is a processing dimension: the changing phase over many pulses encodes along-track position. A range–Doppler map is an intermediate representation, not the final range–azimuth image or a conventional target range–speed plot.
 
-This demonstration forms the complex image coherently and displays its magnitude. A single bright scatterer makes the point-spread function, sidelobes, and position error visible. Its actual position at the middle of the aperture is slant range 5000 m and azimuth 0 m. Cyan crosses mark this location; green circles mark the predicted apparent image position.
+This demonstration forms the complex image coherently and displays linear power or logarithmic power. A single bright scatterer makes the point-spread function, sidelobes, and position error visible. Its actual position at the middle of the aperture is slant range 5000 m and azimuth 0 m. Cyan crosses mark this location; green circles mark the predicted apparent image position.
 
 ## Controlled experiments
 
@@ -16,7 +32,7 @@ Other parameters stay fixed while each requested variable changes. The platform 
 
 ### Bandwidth: range clarity
 
-A larger bandwidth compresses the response into a narrower range interval. In the bandwidth figure the vertical azimuth response stays the same while the horizontal response narrows. The model's resolution is the peak-to-first-null separation, not pixel spacing or the full −3 dB width. For a rectangular spectrum the full power −3 dB width is approximately 0.886 c/(2B). Finer display pixels alone do not increase physical resolution.
+A larger bandwidth compresses the response into a narrower range interval. In the current browser image, horizontal azimuth stays the same while the vertical slant-range response narrows. The model's resolution is the peak-to-first-null separation, not pixel spacing or the full −3 dB width. For a rectangular spectrum the full power −3 dB width is approximately 0.886 c/(2B). Finer display pixels alone do not increase physical resolution.
 
 ### Radial velocity: physical motion versus apparent position
 
@@ -58,3 +74,35 @@ If α is the processed fraction, Tprocessed = α R0 λ/(V La). The ideal rectang
 Hann azimuth weighting suppresses sidelobes but broadens the stationary half-power width from approximately 0.883 to 1.441 m at baseline. The processor normalizes by the sum of weights, keeping the stationary peak at one. This demonstration does not include weighting-related SNR loss. The range response stays unchanged.
 
 At +3 m/s, shortening the aperture from 100% to 25% reduces range walk from 1.50 to 0.375 m. The peak rises from 0.589 to approximately 0.966 under the normalized model, while the moving response widens from about 1.25 to 3.60 m. Its apparent +100 m azimuth displacement remains. More concentrated peak amplitude does not automatically mean finer resolution or correct position.
+
+
+## Expert-review corrections: fixed axes, focus and squint
+
+The main SAR view uses fixed horizontal azimuth coordinates −220 to +220 m and vertical absolute slant range 4985 to 5015 m. It no longer recentres or rescales with velocity or antenna length. The separate detail and azimuth profile use fixed relative offsets −10 to +10 m from the predicted peak; read the main image or location caption for absolute position. Max pooling when downsampling the overview preserves visible narrow peaks; it does not improve resolution.
+
+A stationary point produces a compact mainlobe plus sinc sidelobes, not an ideal single pixel. Linear power is now the default; the −40 dB view deliberately exposes weaker sidelobes. An uncompensated moving target also has range–azimuth coupling: the time-varying range envelope produces a wing-like response. This is an output of this idealized model, not a claim that every real moving target has a butterfly shape. The new **Known radial motion** diagnostic removes the specified linear phase and range walk and restores the stationary point response. It assumes velocity is known exactly; it does not estimate it. The observed intermediate range–Doppler map does not change when the processor changes.
+
+Physical and synthetic aperture lengths must be distinguished. A longer physical antenna narrows the beam, shortens stripmap dwell and makes the fully processed stripmap response coarser. Increasing the processed synthetic aperture at fixed physical antenna instead sharpens it. Both lengths are now displayed. The relationship is supported by [ICEYE’s SAR explanation](https://sar.iceye.com/6.0.4/foundations/OverviewOfSAR/remarkableStory/).
+
+Squint θ is measured from broadside, positive forward-looking, limited to ±15°. The local quadratic model uses:
+
+- Platform Doppler centroid: 2 V sin(θ) / λ, analytically removed **before sampling**.
+- Azimuth chirp rate: Ka = 2 V² cos²(θ) / (λ R0).
+- Beam-limited processed dwell: T ≈ α R0 λ / (V La cos(θ)).
+- Stationary rectangular first-null reference: V/(Ka T) ≈ La/(2α cos(θ)).
+- Uncompensated radial-motion apparent displacement: vr R0/(V cos²(θ)).
+
+The intermediate frequency axis is relative to the removed squint centroid. The Nyquist check concerns this residual spectrum, not the original centroid, which can exceed PRF/2. This is an ideal centroid-corrected local model with ideal stationary RCMC, not a full raw-data squinted SAR processor. It excludes higher-order range–azimuth coupling and exact off-axis geolocation. Existing broadside equations above are θ = 0 special cases.
+
+### What does the weighting broadening factor mean?
+
+For full power −3 dB mainlobe width **relative to Rectangular at the same dwell**:
+
+| Window | Broadening β | Full −3 dB width in units of 1/T | Equivalent noise bandwidth in bins |
+|---|---:|---:|---:|
+| Rectangular | 1.00 | ≈0.8859 | 1.00 |
+| Hann | ≈1.63 | ≈1.4406 | ≈1.50 |
+
+Thus Hann 1.50 is a noise-bandwidth factor, not this resolution-broadening factor. The app computes the half-power crossing of the actual discrete window DTFT, so a finite symmetric Hann has a slightly different factor (about 1.628 at the 800-pulse baseline). Predicted stationary image width is β × rectangular full −3 dB width; motion defocus is measured separately. See [Harris, On the Use of Windows for Harmonic Analysis with the DFT](https://amst.ece.iastate.edu/paper/comparative_study/window_1.pdf).
+
+The JS regression suite covers fixed axes across controls, sinc response, signed motion, exact ideal compensation, physical/synthetic aperture scaling, ±15° squint, window-width factors and parameter extremes. The NumPy reference and earlier Streamlit tests also pass in the project virtual environment.
